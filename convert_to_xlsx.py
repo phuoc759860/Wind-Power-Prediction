@@ -168,7 +168,7 @@ def convert_all():
 
         _write_fast(df, xlsx_path)
         if name in ("metrics", "evaluation_metrics"):
-            col_map = {i + 1: c for i, c in enumerate(df.columns)}
+            col_map = {c: i + 1 for i, c in enumerate(df.columns)}
             num_fmts = {}
             color_cols = {}
             for c in ["mae", "rmse", "MAE", "RMSE", "max_error"]:
@@ -187,7 +187,7 @@ def convert_all():
                              num_fmts=num_fmts, color_cols=color_cols)
 
         elif name == "farm_forecast":
-            col_map = {i + 1: c for i, c in enumerate(df.columns)}
+            col_map = {c: i + 1 for i, c in enumerate(df.columns)}
             num_fmts = {}
             for c in ["farm_power_pred", "farm_energy_pred"]:
                 if c in col_map:
@@ -195,7 +195,7 @@ def convert_all():
             _open_and_format(xlsx_path, "Farm-Level Forecast", num_fmts=num_fmts)
 
         elif name == "data_quality_report":
-            col_map = {i + 1: c for i, c in enumerate(df.columns)}
+            col_map = {c: i + 1 for i, c in enumerate(df.columns)}
             color_cols = {}
             if "missing_rate" in col_map:
                 color_cols[col_map["missing_rate"]] = "missing"
@@ -209,7 +209,7 @@ def convert_all():
             _open_and_format(xlsx_path, "Ramp Events Detected")
 
         elif name == "failure_risk":
-            col_map = {i + 1: c for i, c in enumerate(df.columns)}
+            col_map = {c: i + 1 for i, c in enumerate(df.columns)}
             color_cols = {}
             num_fmts = {}
             if "failure_probability" in col_map:
@@ -222,7 +222,7 @@ def convert_all():
             _open_and_format(xlsx_path, "Anomaly Alerts")
 
         elif name == "temperature_warning":
-            col_map = {i + 1: c for i, c in enumerate(df.columns)}
+            col_map = {c: i + 1 for i, c in enumerate(df.columns)}
             color_cols = {}
             num_fmts = {}
             if "temperature" in col_map:

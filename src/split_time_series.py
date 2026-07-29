@@ -61,13 +61,13 @@ def walk_forward_split(df: pd.DataFrame, n_folds: int = 5,
     total = len(df)
     folds = []
     test_size = val_size
-    step = int(total * (1 - n_folds * test_size) / n_folds) if n_folds > 1 else int(total * 0.5)
-    step = max(step, 100)
+    train_start_ratio = 0.3
+    step_ratio = 0.15
 
     for i in range(n_folds):
-        train_end = int(total * (0.3 + i * 0.15))
-        val_end = int(total * (0.45 + i * 0.15))
-        test_end = min(int(total * (0.6 + i * 0.15)), total)
+        train_end = int(total * (train_start_ratio + i * step_ratio))
+        val_end = int(total * (train_start_ratio + step_ratio + i * step_ratio))
+        test_end = min(int(total * (train_start_ratio + 2 * step_ratio + i * step_ratio)), total)
 
         train_end = max(train_end, 100)
         val_end = max(val_end, train_end + 1)

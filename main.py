@@ -309,6 +309,27 @@ def main():
     logger.info(f"7 summary visualizations saved to {fig_dir}")
 
     # ============================================================
+    # STEP 14: Generate all doc Section 15 output files
+    # ============================================================
+    logger.info("\n" + "=" * 60)
+    logger.info("STEP 14: GENERATING OUTPUT FILES (DOC SECTION 15)")
+    logger.info("=" * 60)
+
+    from generate_outputs import (
+        generate_power_forecast, generate_farm_forecast, generate_metrics,
+        generate_data_quality_report, generate_ramp_alert, generate_anomaly_alert,
+        generate_failure_risk, generate_temperature_warning,
+    )
+    generate_power_forecast(test_df, all_trained_models)
+    generate_farm_forecast(test_df, all_trained_models)
+    generate_metrics()
+    generate_data_quality_report()
+    generate_ramp_alert(test_df)
+    generate_anomaly_alert(test_df)
+    generate_failure_risk(test_df)
+    generate_temperature_warning(test_df)
+
+    # ============================================================
     # SUMMARY
     # ============================================================
     elapsed = time.time() - start_time
