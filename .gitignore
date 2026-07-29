@@ -24,6 +24,11 @@ convert_xlsx/*
 !xlsx/.gitkeep
 !convert_xlsx/.gitkeep
 
+# Archives
+*.zip
+*.tar.gz
+*.7z
+
 # OS
 .DS_Store
 Thumbs.db
