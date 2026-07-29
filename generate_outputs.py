@@ -416,19 +416,51 @@ def generate_temperature_warning(test_df):
 
 
 def generate_figures():
-    """Generate figures to outputs/figures/ from evaluation results"""
+    """Generate figures to outputs/figures/ — runs evaluation if needed"""
     logger.info("Generating figures ...")
 
     fig_dir = BASE / "outputs" / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     eval_path = OUT / "evaluation_metrics.csv"
-    if not eval_path.exists():
-        logger.warning("  evaluation_metrics.csv not found, skipping figures")
-        return
+    if eval_path.exists():
+        results_df = pd.read_csv(eval_path)
+        test_df = get_test_data()
+    else:
+        logger.info("  evaluation_metrics.csv not found, running evaluation ...")
+        test_df = get_test_data()
+        models = load_models()
 
-    results_df = pd.read_csv(eval_path)
-    test_df = get_test_data()
+        from src.evaluate import evaluate_all_models, compute_farm_level_metrics
+        from src.predict import predict_power
+        config = load_config()
+
+        predictions = {}
+        for tb in TURBINES:
+            for horizon in HORIZON_NAMES:
+                for mdl_name in ["lightgbm", "xgboost"]:
+                    target = f"{tb}_power_target_{horizon}"
+                    model_key = f"{target}_{mdl_name}"
+                    if model_key in models:
+                        from src.predict import predict_with_model
+                        preds = predict_with_model(models[model_key], test_df)
+                        predictions[model_key] = {"predictions": preds, "model_name": mdl_name, "target": target}
+
+                farm_target = f"farm_total_power_target_{horizon}"
+                farm_key = f"{farm_target}_{mdl_name}"
+                if farm_key in models:
+                    from src.predict import predict_with_model
+                    preds = predict_with_model(models[farm_key], test_df)
+                    predictions[farm_key] = {"predictions": preds, "model_name": mdl_name, "target": farm_target}
+
+        results_df = evaluate_all_models(test_df, predictions, {}, config)
+        if not results_df.empty:
+            results_df.to_csv(OUT / "evaluation_metrics.csv", index=False)
+            farm_metrics_df = compute_farm_level_metrics(test_df, predictions, config)
+            if not farm_metrics_df.empty:
+                farm_metrics_df.to_csv(OUT / "farm_metrics.csv", index=False)
+            generate_metrics()
+            logger.info(f"  evaluation_metrics.csv saved ({len(results_df)} rows)")
 
     from src.evaluate import (
         plot_performance_heatmap, plot_horizon_decay, plot_radar_summary,
