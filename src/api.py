@@ -212,6 +212,15 @@ def get_failure_risk(limit: int = 100):
     return df.to_dict(orient="records")
 
 
+@app.get("/outputs/temperature-warnings")
+def get_temperature_warnings(limit: int = 100):
+    path = BASE_DIR / "outputs" / "forecasts" / "temperature_warning.csv"
+    if not path.exists():
+        raise HTTPException(404, "temperature_warning.csv not found")
+    df = pd.read_csv(path, nrows=limit)
+    return df.to_dict(orient="records")
+
+
 @app.get("/outputs/data-quality")
 def get_data_quality():
     path = BASE_DIR / "outputs" / "forecasts" / "data_quality_report.csv"
@@ -228,7 +237,7 @@ def download_file(filename: str):
     allowed = [
         "power_forecast.csv", "farm_forecast.csv", "metrics.csv",
         "evaluation_metrics.csv", "ramp_alert.csv", "anomaly_alert.csv",
-        "failure_risk.csv", "data_quality_report.csv",
+        "failure_risk.csv", "data_quality_report.csv", "temperature_warning.csv",
     ]
     if filename not in allowed:
         raise HTTPException(400, "File not allowed for download")

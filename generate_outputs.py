@@ -325,6 +325,124 @@ def generate_anomaly_alert(test_df):
     logger.info(f"  anomaly_alert.csv: {df.shape[0]} rows")
 
 
+def generate_temperature_warning(test_df):
+    """Generate temperature_warning.csv — alerts for out-of-range or rapid temp changes"""
+    logger.info("Generating temperature_warning.csv ...")
+
+    ts_col = "timestamp"
+    if ts_col not in test_df.columns:
+        ts_col = test_df.columns[0]
+
+    TEMP_HIGH_WARN = 45
+    TEMP_HIGH_CRIT = 50
+    TEMP_LOW_WARN = -10
+    TEMP_LOW_CRIT = -15
+    RAPID_CHANGE_DELTA = 5
+    SUSTAINED_HIGH = 40
+    SUSTAINED_WINDOW = 3
+
+    rows = []
+    for tb in TURBINES:
+        temp_col = f"{tb}_temperature"
+        if temp_col not in test_df.columns:
+            continue
+
+        temps = test_df[temp_col].values
+        timestamps = test_df[ts_col].values
+        sustained_count = 0
+
+        for i in range(len(temps)):
+            if np.isnan(temps[i]):
+                sustained_count = 0
+                continue
+
+            ts = str(timestamps[i])
+            temp_val = round(float(temps[i]), 2)
+
+            if temps[i] >= TEMP_HIGH_CRIT:
+                rows.append({"timestamp": ts, "turbine_id": tb, "temperature": temp_val,
+                             "warning_type": "high_temperature", "severity": "critical",
+                             "message": f"Critical high temperature: {temp_val}°C (≥{TEMP_HIGH_CRIT}°C)"})
+            elif temps[i] >= TEMP_HIGH_WARN:
+                rows.append({"timestamp": ts, "turbine_id": tb, "temperature": temp_val,
+                             "warning_type": "high_temperature", "severity": "warning",
+                             "message": f"High temperature: {temp_val}°C (≥{TEMP_HIGH_WARN}°C)"})
+
+            if temps[i] <= TEMP_LOW_CRIT:
+                rows.append({"timestamp": ts, "turbine_id": tb, "temperature": temp_val,
+                             "warning_type": "low_temperature", "severity": "critical",
+                             "message": f"Critical low temperature: {temp_val}°C (≤{TEMP_LOW_CRIT}°C)"})
+            elif temps[i] <= TEMP_LOW_WARN:
+                rows.append({"timestamp": ts, "turbine_id": tb, "temperature": temp_val,
+                             "warning_type": "low_temperature", "severity": "warning",
+                             "message": f"Low temperature: {temp_val}°C (≤{TEMP_LOW_WARN}°C)"})
+
+            if i > 0 and not np.isnan(temps[i - 1]):
+                delta = abs(temps[i] - temps[i - 1])
+                if delta >= RAPID_CHANGE_DELTA:
+                    rows.append({"timestamp": ts, "turbine_id": tb, "temperature": temp_val,
+                                 "warning_type": "rapid_temp_change", "severity": "warning",
+                                 "message": f"Rapid temperature change: {delta:.1f}°C in 10min (≥{RAPID_CHANGE_DELTA}°C)"})
+
+            if temps[i] >= SUSTAINED_HIGH:
+                sustained_count += 1
+            else:
+                sustained_count = 0
+
+            if sustained_count == SUSTAINED_WINDOW:
+                rows.append({"timestamp": ts, "turbine_id": tb, "temperature": temp_val,
+                             "warning_type": "sustained_high_temp", "severity": "warning",
+                             "message": f"Sustained high temperature: {temp_val}°C for {SUSTAINED_WINDOW} consecutive readings (≥{SUSTAINED_HIGH}°C)"})
+
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "temperature_warning.csv", index=False)
+    logger.info(f"  temperature_warning.csv: {df.shape[0]} rows")
+
+
+def generate_figures():
+    """Generate figures to outputs/figures/ from evaluation results"""
+    logger.info("Generating figures ...")
+
+    fig_dir = BASE / "outputs" / "figures"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    eval_path = OUT / "evaluation_metrics.csv"
+    if not eval_path.exists():
+        logger.warning("  evaluation_metrics.csv not found, skipping figures")
+        return
+
+    results_df = pd.read_csv(eval_path)
+    test_df = get_test_data()
+
+    from src.evaluate import (
+        plot_performance_heatmap, plot_horizon_decay, plot_radar_summary,
+        plot_tb12_distribution, plot_model_comparison, plot_horizon_comparison,
+    )
+
+    plot_performance_heatmap(results_df, str(fig_dir / "01_performance_heatmap.png"))
+    plot_horizon_decay(results_df, str(fig_dir / "02_horizon_decay.png"))
+    plot_radar_summary(results_df, str(fig_dir / "06_radar_summary.png"))
+    plot_tb12_distribution(test_df, str(fig_dir / "14_tb12_distribution.png"))
+    plot_model_comparison(results_df, str(fig_dir / "07_model_comparison.png"))
+    plot_horizon_comparison(results_df, str(fig_dir / "08_horizon_comparison.png"))
+
+    agg_cols = ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2"]
+    available = [c for c in agg_cols if c in results_df.columns]
+    summary = results_df.groupby("model")[available].mean().round(4)
+    summary.to_csv(fig_dir / "model_summary.csv")
+
+    logger.info(f"  {len(list(fig_dir.glob('*.png')))} figures saved to {fig_dir}")
+
+
+def convert_csv_to_xlsx():
+    """Convert all CSVs in outputs/forecasts/ to XLSX in outputs/xlsx/"""
+    logger.info("Converting CSVs to XLSX ...")
+    from convert_to_xlsx import convert_all
+    results = convert_all()
+    for name, rows in results:
+        logger.info(f"  {name}: {rows:,} rows -> XLSX")
+
+
 def generate_failure_risk(test_df):
     """Generate failure_risk.csv per doc section 15 Table 9 Row 5"""
     logger.info("Generating failure_risk.csv ...")
@@ -371,11 +489,7 @@ def generate_failure_risk(test_df):
     logger.info(f"  failure_risk.csv: {df.shape[0]} rows")
 
 
-def main():
-    logger.info("=" * 60)
-    logger.info("Generating all required output files (Doc Section 15)")
-    logger.info("=" * 60)
-
+def generate_all():
     test_df = get_test_data()
     logger.info(f"Test data: {test_df.shape}")
 
@@ -389,13 +503,25 @@ def main():
     generate_ramp_alert(test_df)
     generate_anomaly_alert(test_df)
     generate_failure_risk(test_df)
+    generate_temperature_warning(test_df)
+
+
+def main():
+    logger.info("=" * 60)
+    logger.info("Generating all required output files (Doc Section 15)")
+    logger.info("=" * 60)
+
+    generate_all()
 
     logger.info("=" * 60)
-    logger.info("All 7 output files generated in outputs/forecasts/")
+    logger.info("All output files generated in outputs/forecasts/")
     logger.info("=" * 60)
 
     for f in sorted(OUT.glob("*.csv")):
         logger.info(f"  {f.name}: {f.stat().st_size:,} bytes")
+
+    generate_figures()
+    convert_csv_to_xlsx()
 
 
 if __name__ == "__main__":

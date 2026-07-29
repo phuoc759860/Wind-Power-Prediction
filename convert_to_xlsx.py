@@ -221,6 +221,15 @@ def convert_all():
         elif name == "anomaly_alert":
             _open_and_format(xlsx_path, "Anomaly Alerts")
 
+        elif name == "temperature_warning":
+            col_map = {i + 1: c for i, c in enumerate(df.columns)}
+            color_cols = {}
+            num_fmts = {}
+            if "temperature" in col_map:
+                num_fmts[col_map["temperature"]] = "0.00"
+            _open_and_format(xlsx_path, "Temperature Warnings",
+                             num_fmts=num_fmts, color_cols=color_cols)
+
         elif name == "forecasts":
             _open_and_format(xlsx_path, "Forecast Output")
 
