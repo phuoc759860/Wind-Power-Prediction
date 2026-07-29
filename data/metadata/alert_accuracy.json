@@ -1,0 +1,20 @@
+{
+  "xgboost": {
+    "precision": 0.9276,
+    "recall": 0.9841,
+    "f1": 0.955,
+    "false_alarm_rate": 0.0724,
+    "tp": 24732,
+    "fp": 1929,
+    "fn": 400
+  },
+  "lightgbm": {
+    "precision": 0.9571,
+    "recall": 0.9803,
+    "f1": 0.9685,
+    "false_alarm_rate": 0.0429,
+    "tp": 24636,
+    "fp": 1105,
+    "fn": 496
+  }
+}
