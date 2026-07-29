@@ -1,0 +1,402 @@
+import logging
+import math
+import numpy as np
+import pandas as pd
+import yaml
+from pathlib import Path
+from datetime import datetime
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+BASE = Path(__file__).resolve().parent
+OUT = BASE / "outputs" / "forecasts"
+OUT.mkdir(parents=True, exist_ok=True)
+
+RATED_POWER = 2200
+HORIZON_MAP = {"10min": 10, "30min": 30, "1hour": 60, "6hour": 360, "24hour": 1440}
+HORIZON_NAMES = ["10min", "30min", "1hour", "6hour", "24hour"]
+TURBINES = [f"TB{i:02d}" for i in range(1, 13)]
+MODEL_VERSION = "2.0.0"
+TIMESTAMP_NOW = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def load_config():
+    with open(BASE / "configs" / "config.yaml", "r") as f:
+        return yaml.safe_load(f)
+
+
+def get_test_data():
+    processed = pd.read_parquet(BASE / "data" / "processed" / "processed_data.parquet")
+    config = load_config()
+    from src.feature_engineering import build_feature_matrix, create_target_columns
+    from src.split_time_series import split_by_time
+
+    feature_data = build_feature_matrix(processed, config)
+    horizons = config.get("forecasting", {}).get("horizons", [])
+    feature_data = create_target_columns(feature_data, horizons)
+    split_cfg = config.get("training", {}).get("split", {})
+    _, _, test_df = split_by_time(
+        feature_data,
+        train_ratio=split_cfg.get("train_ratio", 0.7),
+        val_ratio=split_cfg.get("validation_ratio", 0.15),
+        test_ratio=split_cfg.get("test_ratio", 0.15),
+    )
+    return test_df
+
+
+def load_models():
+    from src.train_power_model import load_models
+    return load_models(str(BASE / "models"))
+
+
+def generate_power_forecast(test_df, models):
+    """Generate power_forecast.csv per doc section 15 Table 9 Row 1"""
+    logger.info("Generating power_forecast.csv ...")
+
+    ts_col = "timestamp"
+    if ts_col not in test_df.columns:
+        ts_col = test_df.columns[0]
+
+    rows = []
+    for tb in TURBINES:
+        for horizon in HORIZON_NAMES:
+            for mdl_name in ["lightgbm", "xgboost"]:
+                target = f"{tb}_power_target_{horizon}"
+                model_key = f"{target}_{mdl_name}"
+                if model_key not in models:
+                    continue
+
+                from src.predict import predict_with_model
+                preds = predict_with_model(models[model_key], test_df)
+                actuals = test_df[target].values if target in test_df.columns else np.full(len(preds), np.nan)
+
+                sigma = np.where(preds > 0, preds * 0.08, 50)
+                lowers = np.maximum(0, preds - 1.96 * sigma)
+                uppers = np.minimum(RATED_POWER, preds + 1.96 * sigma)
+
+                for i in range(len(preds)):
+                    ts_target = test_df[ts_col].iloc[i] if ts_col in test_df.columns else ""
+                    horizon_min = HORIZON_MAP[horizon]
+                    rows.append({
+                        "timestamp_issue": TIMESTAMP_NOW,
+                        "timestamp_target": str(ts_target),
+                        "turbine_id": tb,
+                        "horizon_min": horizon_min,
+                        "y_pred": round(float(preds[i]), 2),
+                        "y_low": round(float(lowers[i]), 2),
+                        "y_high": round(float(uppers[i]), 2),
+                        "model_version": f"{MODEL_VERSION}_{mdl_name}",
+                    })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "power_forecast.csv", index=False)
+    logger.info(f"  power_forecast.csv: {df.shape[0]} rows")
+
+
+def generate_farm_forecast(test_df, models):
+    """Generate farm_forecast.csv per doc section 15 Table 9 Row 2"""
+    logger.info("Generating farm_forecast.csv ...")
+
+    ts_col = "timestamp"
+    if ts_col not in test_df.columns:
+        ts_col = test_df.columns[0]
+
+    rows = []
+    for horizon in HORIZON_NAMES:
+        for mdl_name in ["lightgbm", "xgboost"]:
+            target = f"farm_total_power_target_{horizon}"
+            model_key = f"{target}_{mdl_name}"
+            if model_key not in models:
+                continue
+
+            from src.predict import predict_with_model
+            preds = predict_with_model(models[model_key], test_df)
+            dt_minutes = HORIZON_MAP[horizon]
+
+            for i in range(len(preds)):
+                ts_target = test_df[ts_col].iloc[i] if ts_col in test_df.columns else ""
+                farm_power = round(float(preds[i]), 2)
+                farm_energy = round(farm_power * dt_minutes / 60.0, 2)
+                rows.append({
+                    "timestamp_issue": TIMESTAMP_NOW,
+                    "timestamp_target": str(ts_target),
+                    "horizon_min": dt_minutes,
+                    "farm_power_pred": farm_power,
+                    "farm_energy_pred": farm_energy,
+                })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "farm_forecast.csv", index=False)
+    logger.info(f"  farm_forecast.csv: {df.shape[0]} rows")
+
+
+def generate_metrics():
+    """Generate metrics.csv per doc section 15 Table 9 Row 6"""
+    logger.info("Generating metrics.csv ...")
+
+    eval_path = OUT / "evaluation_metrics.csv"
+    if not eval_path.exists():
+        logger.warning("  evaluation_metrics.csv not found, skipping metrics.csv")
+        return
+
+    df = pd.read_csv(eval_path)
+
+    def parse_turbine(target):
+        for tb in TURBINES:
+            if target.startswith(tb):
+                return tb
+        return "farm"
+
+    records = []
+    for _, row in df.iterrows():
+        turbine = parse_turbine(row.get("target", ""))
+        records.append({
+            "model": row.get("model", ""),
+            "turbine_id": turbine,
+            "horizon": row.get("horizon", ""),
+            "MAE": round(row.get("mae", 0), 4),
+            "RMSE": round(row.get("rmse", 0), 4),
+            "nMAE": round(row.get("nmae_pct", 0), 4),
+            "nRMSE": round(row.get("nrmse_pct", 0), 4),
+            "Bias": round(row.get("bias", 0), 4),
+            "R2": round(row.get("r2", 0), 4),
+            "skill_score": round(row.get("skill_score", 0), 4),
+        })
+
+    out = pd.DataFrame(records)
+    out.to_csv(OUT / "metrics.csv", index=False)
+    logger.info(f"  metrics.csv: {out.shape[0]} rows")
+
+
+def generate_data_quality_report():
+    """Generate data_quality_report.csv per doc section 15 Table 9 Row 7"""
+    logger.info("Generating data_quality_report.csv ...")
+
+    processed = pd.read_parquet(BASE / "data" / "processed" / "processed_data.parquet")
+
+    records = []
+    for col in processed.columns:
+        s = processed[col]
+        total = len(s)
+        missing = int(s.isna().sum())
+        missing_rate = round(missing / total * 100, 2) if total > 0 else 0
+
+        if pd.api.types.is_numeric_dtype(s):
+            valid = s.dropna()
+            invalid = int(((valid < -1000) | (valid > 100000)).sum()) if len(valid) > 0 else 0
+            min_val = round(float(valid.min()), 4) if len(valid) > 0 else ""
+            max_val = round(float(valid.max()), 4) if len(valid) > 0 else ""
+            if "power" in col.lower():
+                unit = "kW"
+            elif "wind" in col.lower() and "speed" in col.lower():
+                unit = "m/s"
+            elif "temp" in col.lower():
+                unit = "degC"
+            elif "freq" in col.lower():
+                unit = "Hz"
+            else:
+                unit = "check"
+        else:
+            invalid = 0
+            min_val = ""
+            max_val = ""
+            unit = "text"
+
+        if missing_rate > 50:
+            remarks = "High missing rate - investigate"
+        elif missing_rate > 10:
+            remarks = "Moderate missing data"
+        elif missing_rate > 0:
+            remarks = "Minor gaps"
+        else:
+            remarks = "Complete"
+
+        records.append({
+            "column": col,
+            "missing_rate": missing_rate,
+            "invalid_count": invalid,
+            "min": min_val,
+            "max": max_val,
+            "unit_status": unit,
+            "remarks": remarks,
+        })
+
+    out = pd.DataFrame(records)
+    out.to_csv(OUT / "data_quality_report.csv", index=False)
+    logger.info(f"  data_quality_report.csv: {out.shape[0]} columns")
+
+
+def generate_ramp_alert(test_df):
+    """Generate ramp_alert.csv per doc section 15 Table 9 Row 3"""
+    logger.info("Generating ramp_alert.csv ...")
+
+    ts_col = "timestamp"
+    if ts_col not in test_df.columns:
+        ts_col = test_df.columns[0]
+
+    dt_min = 10
+    dt_hours = dt_min / 60.0
+    ramp_threshold_mw_per_min = 0.1
+
+    rows = []
+    for tb in TURBINES:
+        pwr_col = f"{tb}_power"
+        if pwr_col not in test_df.columns:
+            continue
+
+        power = test_df[pwr_col].values
+        timestamps = test_df[ts_col].values
+
+        for i in range(1, len(power)):
+            if np.isnan(power[i]) or np.isnan(power[i - 1]):
+                continue
+            delta_p = (power[i] - power[i - 1]) / 1000.0
+            rate = delta_p / dt_min
+
+            if abs(rate) > ramp_threshold_mw_per_min:
+                ramp_type = "ramp_up" if rate > 0 else "ramp_down"
+                rows.append({
+                    "timestamp": str(timestamps[i]),
+                    "ramp_type": ramp_type,
+                    "expected_change": round(delta_p, 4),
+                    "probability": round(min(1.0, abs(rate) / 0.5), 4),
+                    "threshold": ramp_threshold_mw_per_min,
+                    "affected_turbines": tb,
+                })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "ramp_alert.csv", index=False)
+    logger.info(f"  ramp_alert.csv: {df.shape[0]} rows")
+
+
+def generate_anomaly_alert(test_df):
+    """Generate anomaly_alert.csv per doc section 15 Table 9 Row 4"""
+    logger.info("Generating anomaly_alert.csv ...")
+
+    ts_col = "timestamp"
+    if ts_col not in test_df.columns:
+        ts_col = test_df.columns[0]
+
+    rows = []
+    for tb in TURBINES:
+        pwr_col = f"{tb}_power"
+        ws_col = f"{tb}_wind_speed"
+        if pwr_col not in test_df.columns or ws_col not in test_df.columns:
+            continue
+
+        power = test_df[pwr_col].values
+        ws = test_df[ws_col].values
+        timestamps = test_df[ts_col].values
+
+        valid = ~(np.isnan(power) | np.isnan(ws))
+        if valid.sum() < 100:
+            continue
+        p_valid = power[valid]
+        mean_p, std_p = np.mean(p_valid), np.std(p_valid)
+
+        for i in range(len(power)):
+            if np.isnan(power[i]) or np.isnan(ws[i]):
+                continue
+            z_score = abs(power[i] - mean_p) / (std_p + 1e-6)
+            if z_score > 3.0:
+                anomaly_score = round(float(z_score), 4)
+                if power[i] < 0:
+                    evidence = "Negative power output (possible motoring)"
+                elif power[i] > RATED_POWER:
+                    evidence = "Power exceeds rated capacity"
+                elif ws[i] < 3 and power[i] > 500:
+                    evidence = "High power at low wind speed"
+                elif ws[i] > 15 and power[i] < 200:
+                    evidence = "Low power at high wind speed"
+                else:
+                    evidence = f"Statistical anomaly (z={anomaly_score:.2f})"
+
+                rows.append({
+                    "timestamp": str(timestamps[i]),
+                    "turbine_id": tb,
+                    "anomaly_score": anomaly_score,
+                    "suspected_component": "power_output",
+                    "evidence": evidence,
+                })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "anomaly_alert.csv", index=False)
+    logger.info(f"  anomaly_alert.csv: {df.shape[0]} rows")
+
+
+def generate_failure_risk(test_df):
+    """Generate failure_risk.csv per doc section 15 Table 9 Row 5"""
+    logger.info("Generating failure_risk.csv ...")
+
+    ts_col = "timestamp"
+    if ts_col not in test_df.columns:
+        ts_col = test_df.columns[0]
+
+    rows = []
+    for tb in TURBINES:
+        pwr_col = f"{tb}_power"
+        if pwr_col not in test_df.columns:
+            continue
+
+        power = test_df[pwr_col].values
+        timestamps = test_df[ts_col].values
+
+        valid_mask = ~np.isnan(power)
+        if valid_mask.sum() < 100:
+            continue
+        p_valid = power[valid_mask]
+        mean_p = np.mean(p_valid)
+
+        stop_count = 0
+        for i in range(len(power)):
+            if np.isnan(power[i]):
+                continue
+            if power[i] < 10 and mean_p > 500:
+                stop_count += 1
+                if stop_count > 3:
+                    rows.append({
+                        "timestamp": str(timestamps[i]),
+                        "turbine_id": tb,
+                        "component": "general",
+                        "horizon": "24hour",
+                        "failure_probability": round(min(0.85, 0.3 + stop_count * 0.05), 4),
+                        "recommended_action": "Inspect turbine - repeated stops detected",
+                    })
+            else:
+                stop_count = 0
+
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "failure_risk.csv", index=False)
+    logger.info(f"  failure_risk.csv: {df.shape[0]} rows")
+
+
+def main():
+    logger.info("=" * 60)
+    logger.info("Generating all required output files (Doc Section 15)")
+    logger.info("=" * 60)
+
+    test_df = get_test_data()
+    logger.info(f"Test data: {test_df.shape}")
+
+    models = load_models()
+    logger.info(f"Models loaded: {len(models)}")
+
+    generate_power_forecast(test_df, models)
+    generate_farm_forecast(test_df, models)
+    generate_metrics()
+    generate_data_quality_report()
+    generate_ramp_alert(test_df)
+    generate_anomaly_alert(test_df)
+    generate_failure_risk(test_df)
+
+    logger.info("=" * 60)
+    logger.info("All 7 output files generated in outputs/forecasts/")
+    logger.info("=" * 60)
+
+    for f in sorted(OUT.glob("*.csv")):
+        logger.info(f"  {f.name}: {f.stat().st_size:,} bytes")
+
+
+if __name__ == "__main__":
+    main()

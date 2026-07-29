@@ -1,0 +1,256 @@
+0: QUY ĐỊNH KÝ HIỆU VÀ CÁC LOẠI DỰ BÁO ĐIỆN GIÓ
+1: TÀI LIỆU KỸ THUẬT GIAO SINH VIÊN THIẾT KẾ VÀ VIẾT CODE
+2: Phạm vi: dữ liệu SCADA nhiều tua-bin, dự báo công suất, sản lượng, sự kiện ramp, bất thường và bảo trì dự báo
+3: 1. MỤC ĐÍCH VÀ NGUYÊN TẮC ÁP DỤNG
+4: Tài liệu này quy định cách hiểu tên cột, hệ thống ký hiệu toán học, các loại bài toán dự báo và yêu cầu đầu ra để sinh viên có thể xây dựng phần mềm dự báo điện gió từ dữ liệu SCADA. Mỗi mô-đun code phải sử dụng đúng tên biến, đúng đơn vị, đúng mốc thời gian và không được tự suy đoán ý nghĩa của cột khi chưa có tài liệu xác minh.
+5: • Giữ nguyên tên cột gốc trong dữ liệu raw; chỉ tạo tên chuẩn hóa trong bảng ánh xạ biến.
+6: • Mỗi biến phải có mô tả, đơn vị, kiểu dữ liệu, tần suất lấy mẫu, miền giá trị và mức độ tin cậy.
+7: • Không huấn luyện mô hình khi chưa xác định cột thời gian, biến mục tiêu và đơn vị của biến mục tiêu.
+8: • Dữ liệu chuỗi thời gian phải chia theo thứ tự thời gian; không được chia ngẫu nhiên làm rò rỉ dữ liệu tương lai.
+9: • Mọi mô hình AI phải được so sánh với mô hình cơ sở Persistence trước khi kết luận có cải thiện.
+10: 2. QUY ƯỚC ĐỌC TÊN CỘT SCADA
+11: Cấu trúc phổ biến của tên cột: [Mã tua-bin]_[Nhóm thiết bị hoặc vị trí đo]_[Đại lượng]_[Loại thống kê]. Trong file thực tế có thể chỉ hiển thị một phần tên ở mỗi hàng tiêu đề, vì vậy phải đọc toàn bộ tiêu đề nhiều tầng của bảng Excel.
+12: 3. ÁNH XẠ CÁC CỘT ĐANG QUAN SÁT
+13: Lưu ý bắt buộc: các trị số khoảng 791–1.715 ở nhóm TBxx_Grid chưa đủ để kết luận là công suất kW. Chỉ gán biến mục tiêu P khi tài liệu metadata hoặc tiêu đề đầy đủ xác nhận đây là Active Power/Production Power.
+14: 4. HÌNH ẢNH DỮ LIỆU THAM KHẢO
+15: 
+16: Hình 1. Nhóm cột Amb và Grid trong dữ liệu SCADA
+17: 
+18: Hình 2. Nhóm cột Production Frequency Avg.
+19: 5. HỆ THỐNG KÝ HIỆU DÙNG TRONG CODE VÀ BÁO CÁO
+20: 6. CÁC LOẠI DỰ BÁO PHẢI THIẾT KẾ
+21: 7. ĐẶC TẢ TOÁN HỌC VÀ ĐẦU RA CỦA TỪNG NHÓM DỰ BÁO
+22: 7.1. Dự báo công suất từng tua-bin
+23: Mục tiêu: ước lượng công suất tác dụng của từng tua-bin tại thời điểm tương lai. Hàm tổng quát: P̂_i(t+h) = F[X_i(t), X_i(t−1), …, X_i(t−m)]. Trong đó X_i gồm công suất lịch sử, tốc độ gió, hướng gió, nhiệt độ, trạng thái, tốc độ rotor, pitch, yaw và các biến liên quan.
+24: • Code đầu ra tối thiểu: timestamp_forecast, turbine_id, horizon, power_actual, power_predicted, lower_bound, upper_bound, model_version.
+25: • Ràng buộc vật lý: 0 ≤ P̂_i(t+h) ≤ P_rated,i đối với trạng thái phát điện bình thường; xử lý riêng giá trị âm nếu hệ thống đo công suất tiêu thụ phụ trợ.
+26: 7.2. Dự báo tổng công suất nhà máy
+27: Tổng công suất: P_farm(t) = Σ(i=1…N) P_i(t). Có hai cách: dự báo riêng từng tua-bin rồi cộng lại, hoặc huấn luyện trực tiếp mô hình dự báo tổng nhà máy. Phần mềm phải hỗ trợ cả hai để so sánh sai số.
+28: 7.3. Dự báo sản lượng điện
+29: Điện năng rời rạc: E[a,b] ≈ Σ P(t_k)·Δt. Khi P dùng kW và Δt dùng giờ, E nhận đơn vị kWh. Không được cộng trực tiếp các giá trị công suất nếu chưa nhân với thời gian lấy mẫu.
+30: 7.4. Dự báo ramp công suất
+31: Tốc độ thay đổi công suất: R(t) = [P(t) − P(t−Δt)]/Δt. Ramp-up khi R(t) > R_threshold; ramp-down khi R(t) < −R_threshold. Ngưỡng có thể tính theo MW/phút, %P_rated/phút hoặc phân vị thống kê. Code phải cho phép cấu hình ngưỡng.
+32: 7.5. Phát hiện bất thường và suy giảm hiệu suất
+33: Sai lệch vận hành: e_perf(t) = P_actual(t) − P_expected(t). AnomalyScore có thể được tính bằng sai số chuẩn hóa, Isolation Forest, Autoencoder hoặc mô hình dự báo phần dư. Phải loại trừ các giai đoạn bảo trì, curtailment, mất lưới và lỗi cảm biến trước khi kết luận tua-bin suy giảm.
+34: 7.6. Dự báo sự cố, availability và RUL
+35: Dự báo sự cố là bài toán phân loại/xác suất: y=1 nếu thiết bị xảy ra lỗi trong cửa sổ h; y=0 nếu không. Availability: A = T_available/T_total. RUL là thời gian từ hiện tại đến thời điểm hỏng dự kiến. Các bài toán này chỉ được triển khai khi có lịch sử alarm, work order, thời gian hỏng và thời gian sửa chữa đủ tin cậy.
+36: 7.7. Dự báo xác suất
+37: Ngoài giá trị điểm P50, phần mềm nên xuất P10 và P90 hoặc khoảng dự báo [PI_low, PI_high]. Ý nghĩa: xác suất kết quả nằm dưới P10 khoảng 10%, dưới P50 khoảng 50% và dưới P90 khoảng 90%, tùy cách hiệu chuẩn mô hình. Cần kiểm tra độ bao phủ của khoảng dự báo trên tập test.
+38: 8. BIẾN ĐẦU VÀO ĐỀ XUẤT
+39: 9. CHÂN TRỜI DỰ BÁO VÀ CẤU HÌNH DỮ LIỆU
+40: Quy đổi bước dự báo: nếu Δt = 10 phút thì 1 giờ = 6 bước, 6 giờ = 36 bước và 24 giờ = 144 bước. Tất cả cấu hình phải lưu trong config.yaml hoặc tệp cấu hình tương đương, không viết cứng trong code.
+41: 10. QUY TRÌNH XỬ LÝ DỮ LIỆU TRƯỚC KHI HUẤN LUYỆN
+42: 1. Đọc dữ liệu và giữ nguyên tên cột gốc.
+43: 2. Xác định cột thời gian, múi giờ, định dạng timestamp và chu kỳ lấy mẫu.
+44: 3. Ghép tiêu đề nhiều tầng để khôi phục tên biến đầy đủ.
+45: 4. Lập data dictionary và bảng ánh xạ tên gốc → tên chuẩn hóa.
+46: 5. Chuyển kiểu dữ liệu; phát hiện chuỗi số đang lưu dưới dạng text.
+47: 6. Loại bản ghi trùng; sắp xếp tăng dần theo thời gian.
+48: 7. Kiểm tra khoảng thời gian mất dữ liệu và tạo cờ missing_flag.
+49: 8. Gắn nhãn trạng thái running, stopped, fault, maintenance, curtailed và grid_off.
+50: 9. Không nội suy qua khoảng dừng dài hoặc qua sự kiện lỗi nếu việc nội suy làm sai bản chất vận hành.
+51: 10. Tạo biến trễ, trung bình trượt, độ lệch chuẩn trượt và tốc độ thay đổi.
+52: 11. Chia train/validation/test theo thời gian.
+53: 12. Chuẩn hóa dữ liệu chỉ bằng tham số tính từ tập train.
+54: 13. Huấn luyện mô hình Persistence trước, sau đó mới huấn luyện ML/DL.
+55: 14. Đánh giá theo từng tua-bin, từng chân trời và từng trạng thái vận hành.
+56: 15. Lưu model, scaler, feature list, version, thời điểm huấn luyện và báo cáo kết quả.
+57: 11. ĐẶC TRƯNG CHUỖI THỜI GIAN PHẢI TẠO
+58: 12. MÔ HÌNH VÀ THỨ TỰ TRIỂN KHAI
+59: 13. CHỈ TIÊU ĐÁNH GIÁ
+60: Không dùng MAPE làm chỉ tiêu duy nhất vì công suất bằng hoặc gần 0 làm sai số phần trăm tăng vô hạn hoặc mất ý nghĩa. Báo cáo phải có kết quả theo từng chân trời dự báo, từng tua-bin và toàn nhà máy.
+61: 14. CẤU TRÚC THƯ MỤC CODE BẮT BUỘC
+62: wind_forecasting/
+63: ├── data/raw/                     # Dữ liệu gốc, không chỉnh sửa
+64: ├── data/processed/               # Dữ liệu đã làm sạch
+65: ├── data/metadata/                # Data dictionary và mapping
+66: ├── configs/config.yaml           # Cấu hình cột, đơn vị, horizon, model
+67: ├── src/load_data.py              # Đọc và kiểm tra file
+68: ├── src/column_mapping.py         # Chuẩn hóa tên biến
+69: ├── src/data_validation.py        # Kiểm tra miền giá trị và đơn vị
+70: ├── src/preprocessing.py          # Làm sạch, resample, missing data
+71: ├── src/feature_engineering.py    # Lag, rolling, cyclic features
+72: ├── src/split_time_series.py      # Chia train/validation/test
+73: ├── src/train_baseline.py         # Persistence và tuyến tính
+74: ├── src/train_power_model.py      # Mô hình công suất
+75: ├── src/train_anomaly_model.py    # Phát hiện bất thường
+76: ├── src/train_failure_model.py    # Dự báo sự cố
+77: ├── src/evaluate.py               # Metrics và biểu đồ
+78: ├── src/predict.py                # Dự báo vận hành
+79: ├── src/api.py                    # API phục vụ UI/SCADA
+80: ├── models/                       # Model, scaler và metadata
+81: ├── outputs/forecasts/            # File kết quả dự báo
+82: ├── outputs/figures/              # Biểu đồ
+83: ├── logs/                         # Nhật ký chạy và lỗi
+84: ├── tests/                        # Unit test
+85: ├── requirements.txt
+86: └── main.py
+87: 15. ĐỊNH DẠNG FILE ĐẦU RA
+88: 16. LỘ TRÌNH GIAO SINH VIÊN
+89: 17. CHECKLIST NGHIỆM THU
+90:  ☐ Có data dictionary cho 100% cột được sử dụng.
+91:  ☐ Đã xác minh TB01_Grid…TB12_Grid là đại lượng gì và đơn vị nào.
+92:  ☐ Có cột timestamp chuẩn, không trùng, đúng múi giờ và đúng Δt.
+93:  ☐ Có cờ trạng thái dừng, lỗi, bảo trì, curtailment và mất lưới.
+94:  ☐ Không có data leakage giữa train, validation và test.
+95:  ☐ Có mô hình Persistence và bảng so sánh với mô hình đề xuất.
+96:  ☐ Có MAE, RMSE, nRMSE, R² và Skill Score theo từng horizon.
+97:  ☐ Dự báo công suất không vượt giới hạn vật lý nếu không có lý do kỹ thuật.
+98:  ☐ Có model version, feature list, scaler và config đi kèm.
+99:  ☐ Có unit test cho đọc dữ liệu, tạo lag, tính năng lượng, tính metrics và xuất file.
+100:  ☐ Có log lỗi và cảnh báo chất lượng dữ liệu.
+101:  ☐ Có biểu đồ công suất thực–dự báo và phân tích các thời điểm sai số lớn.
+102:  ☐ Có hướng dẫn chạy code từ đầu đến cuối trên máy mới.
+103: 18. KẾT LUẬN VÀ CHỈ ĐẠO KỸ THUẬT
+104: Bài toán ưu tiên trước mắt là dự báo công suất từng tua-bin, tổng công suất nhà máy, sản lượng ngày tới, sự kiện ramp và bất thường vận hành. Dự báo tần số không phải mục tiêu chính nếu dữ liệu chỉ dao động quanh 50 Hz và không có độ phân giải thời gian cao. Dự báo sự cố, availability và RUL chỉ triển khai sau khi có dữ liệu cảnh báo, lịch sử hỏng hóc và bảo trì được gắn nhãn đầy đủ.
+105: Điều kiện tiên quyết: xác minh chính xác ý nghĩa của TB01_Grid đến TB12_Grid. Nếu đây là Active Power/Production Power, sinh viên có thể dùng làm biến mục tiêu. Nếu đây là tốc độ máy phát hoặc biến khác, phải tìm đúng cột công suất trước khi viết mô-đun dự báo điện năng.
+106: Tên tài liệu đề xuất sử dụng trong nhóm phát triển: “Quy định ký hiệu và đặc tả các mô-đun dự báo điện gió từ dữ liệu SCADA – AMG”.
+
+=== TABLE 0 ===
+  Row 0: ['Ký hiệu/tên cột', 'Tên tiếng Anh', 'Cách hiểu khi lập trình']
+  Row 1: ['TB01…TB12', 'Turbine 01 đến Turbine 12', 'Mã nhận diện từng tua-bin']
+  Row 2: ['Amb', 'Ambient', 'Điều kiện môi trường; trong dữ liệu đang xem nhiều khả năng là nhiệt độ môi trường']
+  Row 3: ['Grid', 'Grid-side measurement', 'Tín hiệu tại phía lưới hoặc điểm đấu nối; chưa tự động đồng nghĩa với công suất']
+  Row 4: ['Production', 'Production/Generation', 'Nhóm đại lượng liên quan đến phát điện']
+  Row 5: ['Frequency', 'Electrical frequency', 'Tần số điện, thông thường đơn vị Hz']
+  Row 6: ['Avg.', 'Average', 'Giá trị trung bình trong chu kỳ lấy mẫu']
+  Row 7: ['Min./Max.', 'Minimum/Maximum', 'Giá trị nhỏ nhất/lớn nhất trong chu kỳ']
+  Row 8: ['Std.', 'Standard deviation', 'Độ lệch chuẩn trong chu kỳ']
+  Row 9: ['(48)', 'Tag/index code', 'Nhiều khả năng là mã hoặc số thứ tự biến SCADA']
+
+=== TABLE 1 ===
+  Row 0: ['Tên gốc', 'Tên chuẩn hóa đề xuất', 'Ý nghĩa', 'Đơn vị', 'Vai trò']
+  Row 1: ['TB09_Amb', 'TB09_Ambient_Temperature', 'Nhiệt độ môi trường tại TB09', '°C, cần xác minh', 'Đầu vào']
+  Row 2: ['TB10_Amb', 'TB10_Ambient_Temperature', 'Nhiệt độ môi trường tại TB10', '°C, cần xác minh', 'Đầu vào']
+  Row 3: ['TB11_Amb', 'TB11_Ambient_Temperature', 'Nhiệt độ môi trường tại TB11', '°C, cần xác minh', 'Đầu vào']
+  Row 4: ['TB12_Amb', 'TB12_Ambient_Temperature', 'Nhiệt độ môi trường tại TB12', '°C, cần xác minh', 'Đầu vào']
+  Row 5: ['TB01_Grid…TB12_Grid', 'TBxx_Grid_Unknown', 'Biến phía lưới của từng tua-bin; phải đọc tiêu đề nhóm để biết công suất, tốc độ hay đại lượng khác', 'Chưa xác định', 'Không dùng làm mục tiêu trước khi xác minh']
+  Row 6: ['Production Frequency Avg. (48)', 'Grid_Frequency_Avg', 'Tần số phát điện/lưới trung bình', 'Hz', 'Giám sát lưới/đầu vào phụ']
+
+=== TABLE 2 ===
+  Row 0: ['Ký hiệu', 'Ý nghĩa', 'Đơn vị/cách dùng']
+  Row 1: ['i', 'Chỉ số tua-bin', 'i = 1, 2, …, N']
+  Row 2: ['N', 'Tổng số tua-bin trong nhà máy', 'N = 12 đối với bộ dữ liệu đang xem']
+  Row 3: ['t', 'Thời điểm hiện tại', 'Timestamp sau khi chuẩn hóa']
+  Row 4: ['Δt', 'Chu kỳ lấy mẫu', 'Ví dụ 10 phút hoặc 15 phút']
+  Row 5: ['h', 'Chân trời dự báo', 'Số bước hoặc số phút/giờ về phía tương lai']
+  Row 6: ['P_i(t)', 'Công suất tác dụng thực tế của tua-bin i tại thời điểm t', 'kW hoặc MW']
+  Row 7: ['P̂_i(t+h)', 'Công suất dự báo của tua-bin i tại t+h', 'kW hoặc MW']
+  Row 8: ['P_farm(t)', 'Tổng công suất thực tế của nhà máy', 'Σ P_i(t)']
+  Row 9: ['P̂_farm(t+h)', 'Tổng công suất nhà máy được dự báo', 'Σ P̂_i(t+h)']
+  Row 10: ['P_rated,i', 'Công suất định mức của tua-bin i', 'kW hoặc MW']
+  Row 11: ['E_i[a,b]', 'Điện năng tua-bin i phát trong khoảng [a,b]', 'kWh hoặc MWh']
+  Row 12: ['v_i(t)', 'Tốc độ gió tại tua-bin i', 'm/s']
+  Row 13: ['θ_i(t)', 'Hướng gió', 'độ, 0–360°']
+  Row 14: ['T_amb,i(t)', 'Nhiệt độ môi trường', '°C']
+  Row 15: ['f(t)', 'Tần số lưới hoặc tần số phát điện', 'Hz']
+  Row 16: ['ω_r,i(t)', 'Tốc độ rotor', 'rpm hoặc rad/s']
+  Row 17: ['ω_g,i(t)', 'Tốc độ máy phát', 'rpm']
+  Row 18: ['β_i(t)', 'Góc pitch cánh', 'độ']
+  Row 19: ['γ_i(t)', 'Góc yaw/nacelle', 'độ']
+  Row 20: ['S_i(t)', 'Trạng thái vận hành', 'running, stopped, fault, maintenance, curtailed']
+  Row 21: ['A_i(t)', 'Mã cảnh báo hoặc tập cảnh báo', 'alarm code/vector']
+  Row 22: ['T_comp,i(t)', 'Nhiệt độ bộ phận', '°C; ổ bi, hộp số, máy phát, converter']
+  Row 23: ['e(t)', 'Sai số dự báo', 'P(t) − P̂(t)']
+  Row 24: ['R(t)', 'Tốc độ thay đổi công suất', '[P(t) − P(t−Δt)]/Δt']
+  Row 25: ['Pr(F_i≤h)', 'Xác suất tua-bin i xảy ra sự cố trong h', '0–1 hoặc %']
+  Row 26: ['RUL_i(t)', 'Tuổi thọ hữu ích còn lại', 'giờ hoặc ngày']
+  Row 27: ['L(t)', 'Công suất tổn thất', 'P_expected(t) − P_actual(t)']
+  Row 28: ['PI_low, PI_high', 'Cận dưới và cận trên của khoảng dự báo', 'kW/MW hoặc đơn vị mục tiêu']
+
+=== TABLE 3 ===
+  Row 0: ['Mã', 'Loại dự báo', 'Đầu ra', 'Chân trời', 'Mức ưu tiên']
+  Row 1: ['F01', 'Dự báo công suất từng tua-bin', 'P̂_i(t+h)', '10 phút, 30 phút, 1 giờ, 6 giờ, 24 giờ', 'Ưu tiên 1']
+  Row 2: ['F02', 'Dự báo tổng công suất nhà máy', 'P̂_farm(t+h)', '10 phút đến 24 giờ', 'Ưu tiên 1']
+  Row 3: ['F03', 'Dự báo sản lượng điện', 'Ê_i[a,b], Ê_farm[a,b]', 'Ngày tới, tháng, năm', 'Ưu tiên 1']
+  Row 4: ['F04', 'Dự báo tốc độ gió', 'v̂_i(t+h)', '10 phút đến 24 giờ', 'Ưu tiên 2']
+  Row 5: ['F05', 'Dự báo hướng gió', 'θ̂_i(t+h)', '10 phút đến 24 giờ', 'Ưu tiên 2']
+  Row 6: ['F06', 'Dự báo ramp công suất', 'R̂(t+h), ramp_up/down', '5 phút đến 6 giờ', 'Ưu tiên 1']
+  Row 7: ['F07', 'Phát hiện và dự báo bất thường', 'AnomalyScore_i(t), Pr(anomaly)', 'Thời gian thực đến 24 giờ', 'Ưu tiên 1']
+  Row 8: ['F08', 'Dự báo sự cố thiết bị', 'Pr(F_i≤h)', '24 giờ, 7 ngày, 30 ngày', 'Ưu tiên 2']
+  Row 9: ['F09', 'Dự báo khả năng sẵn sàng', 'Â_i(t+h)', 'Ngày tới, tuần tới', 'Ưu tiên 2']
+  Row 10: ['F10', 'Dự báo tuổi thọ còn lại', 'RUL_i(t)', 'Giờ/ngày còn lại', 'Ưu tiên 3']
+  Row 11: ['F11', 'Dự báo nhiệt độ bộ phận', 'T̂_comp,i(t+h)', '10 phút đến 24 giờ', 'Ưu tiên 2']
+  Row 12: ['F12', 'Dự báo công suất kỳ vọng và tổn thất', 'P_expected, L̂(t+h)', '10 phút đến tháng', 'Ưu tiên 2']
+  Row 13: ['F13', 'Dự báo cửa sổ bảo trì phù hợp', 'MaintenanceWindow', '1–7 ngày', 'Ưu tiên 3']
+  Row 14: ['F14', 'Dự báo sự kiện tần số/lưới', 'Pr(f outside limit)', 'Giây đến 1 giờ, cần dữ liệu nhanh', 'Ưu tiên 3']
+  Row 15: ['F15', 'Dự báo xác suất/khoảng dự báo', 'P10/P50/P90 hoặc PI_low/PI_high', 'Theo mọi chân trời', 'Ưu tiên 2']
+
+=== TABLE 4 ===
+  Row 0: ['Nhóm biến', 'Ví dụ', 'Mức cần thiết']
+  Row 1: ['Nhóm thời gian', 'timestamp, hour, day_of_week, month, season', 'Bắt buộc']
+  Row 2: ['Công suất', 'P_i(t), P_i(t−1…m), P_farm(t)', 'Bắt buộc nếu dự báo công suất']
+  Row 3: ['Khí tượng', 'wind_speed, wind_direction, temperature, pressure, humidity', 'Rất quan trọng']
+  Row 4: ['Tua-bin', 'rotor_speed, generator_speed, pitch_angle, yaw_angle', 'Rất quan trọng']
+  Row 5: ['Điện', 'voltage, current, reactive_power, power_factor, frequency', 'Quan trọng']
+  Row 6: ['Trạng thái', 'operating_state, stop_reason, curtailment_flag, grid_loss_flag', 'Bắt buộc để lọc dữ liệu']
+  Row 7: ['Cảnh báo', 'alarm_code, alarm_count, alarm_duration', 'Bắt buộc cho dự báo lỗi']
+  Row 8: ['Nhiệt độ thiết bị', 'bearing, gearbox, generator, converter, transformer temperatures', 'Bắt buộc cho bảo trì dự báo']
+  Row 9: ['Rung động', 'vibration RMS, spectrum features', 'Cần nếu có CMS']
+  Row 10: ['NWP', 'dự báo tốc độ/hướng gió theo không gian và thời gian', 'Cần cho dự báo 6–48 giờ']
+  Row 11: ['Bảo trì', 'work order, failure time, repair time, replaced component', 'Bắt buộc cho RUL/availability']
+
+=== TABLE 5 ===
+  Row 0: ['Nhóm', 'Chân trời', 'Ứng dụng']
+  Row 1: ['Nowcasting', '1–6 bước lấy mẫu; khoảng 5–60 phút', 'Điều khiển thời gian thực, ramp, BESS']
+  Row 2: ['Rất ngắn hạn', '1–6 giờ', 'Điều độ nội ngày, phối hợp dự phòng']
+  Row 3: ['Ngắn hạn', '6–48 giờ', 'Kế hoạch ngày tới, thị trường điện; cần NWP']
+  Row 4: ['Trung hạn', '2–7 ngày', 'Kế hoạch vận hành và bảo trì']
+  Row 5: ['Dài hạn', 'Tháng–năm', 'Sản lượng, tài chính, xu hướng suy giảm']
+
+=== TABLE 6 ===
+  Row 0: ['Nhóm đặc trưng', 'Tên code đề xuất', 'Ý nghĩa']
+  Row 1: ['Lag', 'P_lag_1, P_lag_3, P_lag_6, P_lag_144', 'Giá trị quá khứ']
+  Row 2: ['Rolling mean', 'P_roll_mean_6, wind_roll_mean_6', 'Trung bình trượt']
+  Row 3: ['Rolling std', 'P_roll_std_6, temp_roll_std_12', 'Mức biến động']
+  Row 4: ['Difference', 'P_diff_1 = P(t)−P(t−1)', 'Tốc độ thay đổi']
+  Row 5: ['Ramp flag', 'ramp_up_flag, ramp_down_flag', 'Nhãn sự kiện ramp']
+  Row 6: ['Cyclic time', 'sin_hour, cos_hour, sin_month, cos_month', 'Mã hóa chu kỳ thời gian']
+  Row 7: ['Wind direction', 'sin(θ), cos(θ)', 'Tránh điểm gián đoạn 0°/360°']
+  Row 8: ['Yaw misalignment', 'θ_wind − γ_nacelle', 'Sai lệch hướng']
+  Row 9: ['Power ratio', 'P/P_rated', 'Chuẩn hóa theo định mức']
+  Row 10: ['Peer turbine', 'median power of nearby turbines', 'So sánh tua-bin lân cận']
+  Row 11: ['Alarm history', 'alarm_count_last_1h/24h', 'Dự báo lỗi']
+  Row 12: ['Thermal residual', 'T_actual − T_expected', 'Cảnh báo nhiệt bất thường']
+
+=== TABLE 7 ===
+  Row 0: ['Mã', 'Mô hình', 'Vai trò', 'Yêu cầu']
+  Row 1: ['M0', 'Persistence', 'P̂(t+h)=P(t)', 'Bắt buộc làm chuẩn']
+  Row 2: ['M1', 'Linear/Ridge Regression', 'Mô hình tuyến tính, dễ kiểm tra', 'Bắt buộc']
+  Row 3: ['M2', 'Random Forest', 'Phi tuyến, phù hợp dữ liệu bảng', 'Khuyến nghị']
+  Row 4: ['M3', 'XGBoost/LightGBM', 'Hiệu quả cao với feature engineering', 'Khuyến nghị']
+  Row 5: ['M4', 'LSTM/GRU', 'Chuỗi thời gian nhiều bước', 'Sau khi baseline ổn định']
+  Row 6: ['M5', 'TCN/Transformer', 'Mô hình nâng cao', 'Giai đoạn sau']
+  Row 7: ['M6', 'Isolation Forest/Autoencoder', 'Phát hiện bất thường', 'Theo nhánh anomaly']
+  Row 8: ['M7', 'Logistic/XGBoost Classifier', 'Dự báo sự cố', 'Khi có nhãn lỗi']
+  Row 9: ['M8', 'Quantile Regression', 'P10/P50/P90', 'Dự báo xác suất']
+
+=== TABLE 8 ===
+  Row 0: ['Chỉ tiêu', 'Công thức rút gọn', 'Ý nghĩa', 'Đơn vị']
+  Row 1: ['MAE', 'mean(|y−ŷ|)', 'Sai số tuyệt đối trung bình', 'kW/MW/đơn vị mục tiêu']
+  Row 2: ['RMSE', 'sqrt(mean((y−ŷ)^2))', 'Nhạy với sai số lớn', 'kW/MW']
+  Row 3: ['nRMSE', 'RMSE/P_rated × 100%', 'Chuẩn hóa theo công suất định mức', '%']
+  Row 4: ['R²', '1−SSE/SST', 'Mức giải thích biến thiên', 'Không đơn vị']
+  Row 5: ['Skill Score', '1−Error_model/Error_persistence', 'Mức cải thiện so với Persistence', '% hoặc số']
+  Row 6: ['Precision', 'TP/(TP+FP)', 'Độ chính xác cảnh báo sự cố/ramp', '0–1']
+  Row 7: ['Recall', 'TP/(TP+FN)', 'Khả năng phát hiện sự kiện', '0–1']
+  Row 8: ['F1', '2PR/(P+R)', 'Cân bằng Precision và Recall', '0–1']
+  Row 9: ['Prediction interval coverage', 'Tỷ lệ y nằm trong [PI_low,PI_high]', 'Kiểm tra khoảng dự báo', '%']
+
+=== TABLE 9 ===
+  Row 0: ['File', 'Các trường bắt buộc']
+  Row 1: ['power_forecast.csv', 'timestamp_issue, timestamp_target, turbine_id, horizon_min, y_pred, y_low, y_high, model_version']
+  Row 2: ['farm_forecast.csv', 'timestamp_issue, timestamp_target, horizon_min, farm_power_pred, farm_energy_pred']
+  Row 3: ['ramp_alert.csv', 'timestamp, ramp_type, expected_change, probability, threshold, affected_turbines']
+  Row 4: ['anomaly_alert.csv', 'timestamp, turbine_id, anomaly_score, suspected_component, evidence']
+  Row 5: ['failure_risk.csv', 'timestamp, turbine_id, component, horizon, failure_probability, recommended_action']
+  Row 6: ['metrics.csv', 'model, turbine_id, horizon, MAE, RMSE, nRMSE, R2, skill_score']
+  Row 7: ['data_quality_report.csv', 'column, missing_rate, invalid_count, min, max, unit_status, remarks']
+
+=== TABLE 10 ===
+  Row 0: ['Giai đoạn', 'Nội dung', 'Điều kiện nghiệm thu']
+  Row 1: ['Giai đoạn 1', 'Xác minh cột và đơn vị; tạo data dictionary; kiểm tra timestamp', 'Không huấn luyện AI khi chưa hoàn thành']
+  Row 2: ['Giai đoạn 2', 'Dự báo công suất từng tua-bin và tổng nhà máy bằng Persistence, Linear, XGBoost', 'Sản phẩm tối thiểu khả dụng']
+  Row 3: ['Giai đoạn 3', 'Dự báo sản lượng, ramp và cảnh báo bất thường', 'Tích hợp dashboard']
+  Row 4: ['Giai đoạn 4', 'Dự báo xác suất P10/P50/P90 và kết hợp NWP', 'Nâng cao độ tin cậy']
+  Row 5: ['Giai đoạn 5', 'Dự báo lỗi, availability, nhiệt độ và RUL', 'Chỉ thực hiện khi có lịch sử sự cố/bảo trì']

@@ -1,0 +1,98 @@
+{
+  "TB01_power": {
+    "turbine": "TB01",
+    "total_hours": 7801.3,
+    "generating_hours": 3963.0,
+    "stopped_hours": 679.8,
+    "missing_hours": 3158.5,
+    "availability_pct": 85.36
+  },
+  "TB02_power": {
+    "turbine": "TB02",
+    "total_hours": 7801.3,
+    "generating_hours": 3982.7,
+    "stopped_hours": 658.0,
+    "missing_hours": 3160.7,
+    "availability_pct": 85.82
+  },
+  "TB03_power": {
+    "turbine": "TB03",
+    "total_hours": 7801.3,
+    "generating_hours": 3977.2,
+    "stopped_hours": 664.3,
+    "missing_hours": 3159.8,
+    "availability_pct": 85.69
+  },
+  "TB04_power": {
+    "turbine": "TB04",
+    "total_hours": 7801.3,
+    "generating_hours": 3996.8,
+    "stopped_hours": 655.0,
+    "missing_hours": 3149.5,
+    "availability_pct": 85.92
+  },
+  "TB05_power": {
+    "turbine": "TB05",
+    "total_hours": 7801.3,
+    "generating_hours": 3871.7,
+    "stopped_hours": 689.7,
+    "missing_hours": 3240.0,
+    "availability_pct": 84.88
+  },
+  "TB06_power": {
+    "turbine": "TB06",
+    "total_hours": 7801.3,
+    "generating_hours": 3919.8,
+    "stopped_hours": 730.5,
+    "missing_hours": 3151.0,
+    "availability_pct": 84.29
+  },
+  "TB07_power": {
+    "turbine": "TB07",
+    "total_hours": 7801.3,
+    "generating_hours": 3922.0,
+    "stopped_hours": 650.0,
+    "missing_hours": 3229.3,
+    "availability_pct": 85.78
+  },
+  "TB08_power": {
+    "turbine": "TB08",
+    "total_hours": 7801.3,
+    "generating_hours": 3891.3,
+    "stopped_hours": 758.5,
+    "missing_hours": 3151.5,
+    "availability_pct": 83.69
+  },
+  "TB09_power": {
+    "turbine": "TB09",
+    "total_hours": 7801.3,
+    "generating_hours": 3858.5,
+    "stopped_hours": 787.0,
+    "missing_hours": 3155.8,
+    "availability_pct": 83.06
+  },
+  "TB10_power": {
+    "turbine": "TB10",
+    "total_hours": 7801.3,
+    "generating_hours": 3853.2,
+    "stopped_hours": 719.5,
+    "missing_hours": 3228.7,
+    "availability_pct": 84.27
+  },
+  "TB11_power": {
+    "turbine": "TB11",
+    "total_hours": 7801.3,
+    "generating_hours": 3877.8,
+    "stopped_hours": 771.7,
+    "missing_hours": 3151.8,
+    "availability_pct": 83.4
+  },
+  "TB12_power": {
+    "turbine": "TB12",
+    "total_hours": 7801.3,
+    "generating_hours": 3345.7,
+    "stopped_hours": 1032.0,
+    "missing_hours": 3423.7,
+    "availability_pct": 76.43
+  }
+}

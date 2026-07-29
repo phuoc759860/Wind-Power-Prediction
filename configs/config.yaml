@@ -1,0 +1,222 @@
+# Wind Power Forecasting Configuration
+# AMG Wind Farm - 12 Turbines SCADA Data
+
+# ============================================================
+# DATA SETTINGS
+# ============================================================
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  metadata_dir: "data/metadata"
+  timestamp_column: "PCTimeStamp"
+  timezone: "Asia/Ho_Chi_Minh"
+  sampling_interval_minutes: 10
+  file_pattern: "*.xlsx"
+  supported_formats: [".xlsx", ".xls", ".csv", ".parquet", ".json"]
+  max_upload_size_mb: 500
+
+# ============================================================
+# TURBINE CONFIGURATION
+# ============================================================
+turbines:
+  ids: ["TB01", "TB02", "TB03", "TB04", "TB05", "TB06",
+        "TB07", "TB08", "TB09", "TB10", "TB11", "TB12"]
+  count: 12
+  rated_power_kw: 2200
+  cut_in_speed: 3.0
+  cut_out_speed: 25.0
+  rated_speed: 12.0
+
+# ============================================================
+# COLUMN MAPPING
+# ============================================================
+column_groups:
+  wind_speed:
+    pattern: "TB{id}_Ambient WindSpeed Avg."
+    unit: "m/s"
+    data_type: float
+    value_range: [0, 60]
+  temperature:
+    pattern: "TB{id}_Ambient Temp. Avg."
+    unit: "C"
+    data_type: float
+    value_range: [-10, 55]
+  power:
+    pattern: "TB{id}_Grid Production Power Avg."
+    unit: "kW"
+    data_type: float
+    value_range: [0, 2200]
+    is_target: true
+  frequency:
+    pattern: "TB{id}_Grid Production Frequency Avg."
+    unit: "Hz"
+    data_type: float
+    value_range: [47, 53]
+
+# ============================================================
+# FORECASTING HORIZONS
+# ============================================================
+forecasting:
+  horizons:
+    - name: "10min"
+      steps: 1
+      description: "10 minutes ahead"
+    - name: "30min"
+      steps: 3
+      description: "30 minutes ahead"
+    - name: "1hour"
+      steps: 6
+      description: "1 hour ahead"
+    - name: "6hour"
+      steps: 36
+      description: "6 hours ahead"
+    - name: "24hour"
+      steps: 144
+      description: "24 hours ahead"
+
+  types:
+    - individual_turbine_power
+    - total_farm_power
+    - energy_production
+    - ramp_detection
+    - anomaly_detection
+
+# ============================================================
+# FEATURE ENGINEERING
+# ============================================================
+features:
+  lag_steps: [1, 2, 3, 6, 12, 144]
+  rolling_windows: [6, 18, 36, 144]
+  rolling_stats: ["mean", "std", "min", "max"]
+
+  temporal:
+    - hour_of_day
+    - day_of_week
+    - month
+    - season
+    - is_weekend
+
+  power_change:
+    - diff_1
+    - diff_3
+    - diff_6
+    - pct_change_1
+
+  ramp:
+    threshold_pct_per_min: 0.5
+
+# ============================================================
+# TRAINING SETTINGS
+# ============================================================
+training:
+  split:
+    train_ratio: 0.7
+    validation_ratio: 0.15
+    test_ratio: 0.15
+
+  random_state: 42
+  cv_folds: 5
+
+  models:
+    baseline:
+      - persistence
+      - linear_regression
+    ml:
+      - xgboost
+      - lightgbm
+
+  tuning:
+    method: "random_search"
+    n_iter: 50
+    cv_folds: 3
+
+# ============================================================
+# MODEL SETTINGS
+# ============================================================
+models:
+  random_forest:
+    n_estimators: 80
+    max_depth: 10
+    min_samples_split: 20
+    min_samples_leaf: 10
+    max_features: 0.5
+    n_jobs: -1
+    random_state: 42
+
+  xgboost:
+    n_estimators: 150
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.5
+    objective: "reg:squarederror"
+    random_state: 42
+
+  lightgbm:
+    n_estimators: 150
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.5
+    objective: "regression"
+    random_state: 42
+    verbose: -1
+
+  linear_regression:
+    fit_intercept: true
+
+# ============================================================
+# EVALUATION SETTINGS
+# ============================================================
+evaluation:
+  metrics:
+    - mae
+    - rmse
+    - nrmse
+    - r2
+    - skill_score
+    - max_error
+
+  baseline_model: "persistence"
+
+  constraints:
+    min_power: 0
+    max_power: 2200
+
+  report_per_turbine: true
+  report_per_horizon: true
+  report_per_month: true
+
+# ============================================================
+# ANOMALY DETECTION
+# ============================================================
+anomaly:
+  methods:
+    - isolation_forest
+    - residual_based
+  contamination: 0.05
+  residual_threshold_std: 3.0
+
+# ============================================================
+# OUTPUT SETTINGS
+# ============================================================
+output:
+  forecasts_dir: "outputs/forecasts"
+  figures_dir: "outputs/figures"
+  models_dir: "models"
+  logs_dir: "logs"
+
+  figure:
+    dpi: 150
+    figsize: [14, 8]
+    style: "seaborn-v0_8-whitegrid"
+
+  forecast_format: "csv"
+
+# ============================================================
+# LOGGING
+# ============================================================
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/wind_forecasting.log"

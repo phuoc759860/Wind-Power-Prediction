@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AMG Wind Farm Forecasting</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f8fafc; --surface: #ffffff; --surface-alt: #f1f5f9;
+  --border: #e2e8f0; --border-hover: #cbd5e1;
+  --text: #1e293b; --text-secondary: #475569; --text-muted: #94a3b8;
+  --accent: #2563eb; --accent-light: #dbeafe; --accent-hover: #1d4ed8;
+  --green: #059669; --green-light: #d1fae5; --green-bg: #ecfdf5;
+  --red: #dc2626; --red-light: #fee2e2; --red-bg: #fef2f2;
+  --orange: #d97706; --orange-light: #fef3c7; --orange-bg: #fffbeb;
+  --purple: #7c3aed; --purple-light: #ede9fe;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,.07), 0 2px 4px -2px rgba(0,0,0,.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,.08), 0 4px 6px -4px rgba(0,0,0,.04);
+  --radius: 12px; --radius-sm: 8px; --radius-xs: 6px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
+
+.container{max-width:1280px;margin:0 auto;padding:0 24px}
+
+/* ── Header ── */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:28px 0 0;position:sticky;top:0;z-index:50;backdrop-filter:blur(8px);background:rgba(255,255,255,.92)}
+.header-top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.logo{display:flex;align-items:center;gap:14px}
+.logo-icon{width:44px;height:44px;background:linear-gradient(135deg,#2563eb,#0ea5e9);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.3rem}
+.logo h1{font-size:1.5rem;font-weight:800;color:var(--text);letter-spacing:-.02em}
+.logo p{font-size:.82rem;color:var(--text-muted);margin-top:1px}
+.header-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:var(--green-bg);border:1px solid #a7f3d0;border-radius:20px;font-size:.78rem;font-weight:600;color:var(--green)}
+.header-badge .dot{width:7px;height:7px;background:var(--green);border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ── Stats ── */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:20px 0}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-sm)}
+.stat-icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
+.stat-icon.blue{background:var(--accent-light);color:var(--accent)}
+.stat-icon.green{background:var(--green-light);color:var(--green)}
+.stat-icon.orange{background:var(--orange-light);color:var(--orange)}
+.stat-icon.purple{background:var(--purple-light);color:var(--purple)}
+.stat-info .value{font-size:1.4rem;font-weight:700;line-height:1.2}
+.stat-info .label{font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;font-weight:500}
+
+main{padding:28px 0 48px}
+
+/* ── Section ── */
+.section{margin-bottom:32px}
+.section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.section-title{font-size:1.15rem;font-weight:700;color:var(--text)}
+.section-sub{font-size:.82rem;color:var(--text-muted)}
+
+/* ── Turbine Grid ── */
+.turbine-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.turbine-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px 16px;cursor:pointer;transition:all .15s ease;position:relative}
+.turbine-card:hover{border-color:var(--accent);box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.turbine-card.active{border-color:var(--accent);background:var(--accent-light);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.turbine-card .tb-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.turbine-card .tb-id{font-size:.88rem;font-weight:700;color:var(--text)}
+.turbine-card .tb-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.turbine-card .tb-avail{font-size:1.5rem;font-weight:800;line-height:1.2;margin-bottom:4px}
+.turbine-card .tb-bar{height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:8px}
+.turbine-card .tb-bar-fill{height:100%;border-radius:3px;transition:width .6s ease}
+.turbine-card .tb-stats{display:flex;gap:10px;font-size:.7rem;color:var(--text-muted)}
+.turbine-card .tb-stats span{display:flex;align-items:center;gap:3px}
+
+/* ── Predict Form ── */
+.predict-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px 32px;box-shadow:var(--shadow)}
+.form-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-top:20px}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-group label{font-size:.78rem;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.form-group input,.form-group select{background:var(--surface-alt);border:1.5px solid var(--border);border-radius:var(--radius-xs);padding:10px 14px;color:var(--text);font-size:.9rem;font-family:inherit;outline:none;transition:all .15s}
+.form-group input:focus,.form-group select:focus{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.form-group input::placeholder{color:var(--text-muted)}
+.form-row{display:flex;gap:12px;align-items:flex-end;margin-top:24px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 24px;border:none;border-radius:var(--radius-xs);font-size:.88rem;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:var(--shadow-sm)}
+.btn-primary:hover{background:var(--accent-hover);box-shadow:var(--shadow-md)}
+.btn-primary:active{transform:scale(.98)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-secondary{background:var(--surface-alt);border:1.5px solid var(--border);color:var(--text-secondary)}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-light)}
+.btn-icon{width:18px;height:18px}
+
+/* ── Results ── */
+.results-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px 32px;box-shadow:var(--shadow);display:none}
+.results-section.show{display:block;animation:fadeUp .3s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.results-header{margin-bottom:20px}
+.results-sub{font-size:.85rem;color:var(--text-muted);margin-top:2px}
+.results-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
+.result-card{background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:18px;text-align:center;transition:all .15s}
+.result-card:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.result-card .horizon-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.result-card .power-val{font-size:2rem;font-weight:800;line-height:1.1}
+.result-card .power-unit{font-size:.8rem;font-weight:500;color:var(--text-muted)}
+.result-card .ci-range{font-size:.75rem;color:var(--text-muted);margin:6px 0 8px}
+.result-card .ci-bar{height:6px;background:var(--border);border-radius:3px;position:relative;overflow:visible}
+.result-card .ci-fill{position:absolute;height:100%;border-radius:3px;opacity:.18}
+.result-card .ci-marker{position:absolute;width:3px;height:16px;border-radius:2px;top:-5px}
+.chart-wrapper{background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:24px}
+.chart-wrapper canvas{max-height:280px}
+
+/* ── Table ── */
+.eval-section{margin-top:32px}
+.eval-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.eval-table th{background:var(--surface-alt);border:1px solid var(--border);padding:10px 14px;text-align:left;font-weight:600;color:var(--text-secondary);position:sticky;top:0}
+.eval-table td{border:1px solid var(--border);padding:8px 14px}
+.eval-table tr:hover td{background:var(--accent-light)}
+.r2-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-weight:600;font-size:.78rem}
+.r2-high{background:var(--green-bg);color:var(--green)}
+.r2-mid{background:var(--orange-bg);color:var(--orange)}
+.r2-low{background:var(--red-bg);color:var(--red)}
+.table-scroll{max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)}
+.est-card{background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:16px;text-align:center}
+.est-card .est-icon{font-size:1.4rem;margin-bottom:6px}
+.est-card .est-val{font-size:1.25rem;font-weight:700;color:var(--text);line-height:1.2}
+.est-card .est-label{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px;margin-top:4px;font-weight:500}
+.est-card .est-desc{font-size:.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;text-align:left}
+
+/* ── Loading / Toast ── */
+.loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.85);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:999;transition:opacity .2s}
+.loading-overlay.hidden{opacity:0;pointer-events:none}
+.spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--surface);border:1px solid var(--red-light);border-radius:var(--radius);padding:14px 20px;color:var(--red);z-index:1000;display:none;box-shadow:var(--shadow-lg);font-weight:500;font-size:.88rem}
+.toast.show{display:flex;align-items:center;gap:8px;animation:fadeUp .3s ease}
+
+footer{text-align:center;padding:20px;color:var(--text-muted);font-size:.78rem;border-top:1px solid var(--border)}
+
+/* ── Responsive ── */
+@media(max-width:1100px){.turbine-grid{grid-template-columns:repeat(4,1fr)}.form-grid{grid-template-columns:repeat(3,1fr)}.results-grid{grid-template-columns:repeat(3,1fr)}#estGrid{grid-template-columns:repeat(3,1fr)!important}}
+@media(max-width:768px){.stats-row{grid-template-columns:repeat(2,1fr)}.turbine-grid{grid-template-columns:repeat(3,1fr)}.form-grid{grid-template-columns:1fr 1fr}.results-grid{grid-template-columns:1fr 1fr}#estGrid{grid-template-columns:1fr 1fr!important}.section>[style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}.section>[style*="grid-template-columns:2fr 1fr"]{grid-template-columns:1fr!important}}
+@media(max-width:480px){.turbine-grid{grid-template-columns:repeat(2,1fr)}.stats-row{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.results-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading">
+  <div style="text-align:center">
+    <div class="spinner" style="margin:0 auto 14px"></div>
+    <div style="color:var(--text-secondary);font-size:.9rem;font-weight:500">Loading models...</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<header>
+  <div class="container">
+    <div class="header-top">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <div>
+          <h1>AMG Wind Farm</h1>
+          <p>Multi-Horizon Power Forecasting Dashboard</p>
+        </div>
+      </div>
+      <div class="header-badge" id="statusBadge">
+        <span class="dot"></span>
+        <span id="statusText">Loading...</span>
+      </div>
+    </div>
+    <div class="stats-row" id="stats"></div>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- Turbines -->
+  <section class="section">
+    <div class="section-head">
+      <div>
+        <div class="section-title">Wind Turbines</div>
+        <div class="section-sub">Click to select a turbine for prediction</div>
+      </div>
+    </div>
+    <div class="turbine-grid" id="turbineGrid"></div>
+  </section>
+
+  <!-- Predict -->
+  <section class="section predict-section">
+    <div class="section-head">
+      <div>
+        <div class="section-title">Make a Prediction</div>
+        <div class="section-sub">Enter SCADA sensor readings to forecast power output across 5 horizons</div>
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Turbine</label>
+        <select id="selTurbine"></select>
+      </div>
+      <div class="form-group">
+        <label>Model</label>
+        <select id="selModel">
+          <option value="lightgbm">LightGBM</option>
+          <option value="xgboost">XGBoost</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Wind Speed (m/s)</label>
+        <input type="number" id="inWind" step="0.1" min="0" max="50" value="8.5">
+      </div>
+      <div class="form-group">
+        <label>Temperature (&deg;C)</label>
+        <input type="number" id="inTemp" step="0.1" min="-30" max="60" value="22">
+      </div>
+      <div class="form-group">
+        <label>Grid Frequency (Hz)</label>
+        <input type="number" id="inFreq" step="0.01" min="45" max="55" value="50">
+      </div>
+      <div class="form-group">
+        <label>Current Power (kW)</label>
+        <input type="number" id="inPower" step="1" min="0" max="2200" value="1500">
+      </div>
+      <div class="form-group">
+        <label>Power Lag 10min (kW)</label>
+        <input type="number" id="inLag1" step="1" min="-500" max="2200" placeholder="optional">
+      </div>
+      <div class="form-group">
+        <label>Power Lag 60min (kW)</label>
+        <input type="number" id="inLag6" step="1" min="-500" max="2200" placeholder="optional">
+      </div>
+      <div class="form-group">
+        <label>Hour of Day</label>
+        <input type="number" id="inHour" min="0" max="23" value="">
+      </div>
+      <div class="form-group">
+        <label>Month</label>
+        <input type="number" id="inMonth" min="1" max="12" value="">
+      </div>
+    </div>
+    <div class="form-row">
+      <button class="btn btn-primary" id="btnPredict" onclick="runPredict()">
+        <svg class="btn-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Predict Power Output
+      </button>
+      <button class="btn btn-secondary" onclick="fillSample()">
+        <svg class="btn-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Random Sample
+      </button>
+    </div>
+  </section>
+
+  <!-- Results -->
+  <section class="results-section" id="resultsSection">
+    <div class="results-header">
+      <div class="section-title">Prediction Results</div>
+      <div class="results-sub" id="resultsSub"></div>
+    </div>
+
+    <div style="background:var(--accent-light);border:1px solid #bfdbfe;border-radius:var(--radius);padding:16px 20px;margin-bottom:20px;font-size:.85rem;color:#1e40af;line-height:1.6">
+      <strong>What am I seeing?</strong> The model takes your <em>current</em> sensor readings (wind speed, temperature, frequency, power) and estimates
+      how much power this turbine will produce at <strong>5 future time steps</strong> \u2014 from 10 minutes to 24 hours ahead.
+      Each prediction comes with a <strong>confidence interval</strong> (the range shown below the value) representing the 95% likely range.
+      The further ahead we predict, the wider the uncertainty.
+    </div>
+
+    <div class="results-grid" id="resultsGrid"></div>
+
+    <div id="estimationPanel" style="display:none;margin-bottom:20px">
+      <div style="font-weight:700;font-size:.92rem;color:var(--text);margin-bottom:10px">Estimations &amp; Context</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px" id="estGrid"></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px">
+      <div class="chart-wrapper" style="min-height:400px">
+        <canvas id="resultChart"></canvas>
+      </div>
+      <div class="chart-wrapper" style="min-height:400px">
+        <canvas id="resultCIChart"></canvas>
+      </div>
+    </div>
+    <div class="chart-wrapper" style="margin-top:16px;min-height:340px">
+      <canvas id="resultWaterfall"></canvas>
+    </div>
+  </section>
+
+  <!-- Analytics Charts -->
+  <section class="section">
+    <div class="section-head">
+      <div>
+        <div class="section-title">Analytics &amp; Insights</div>
+        <div class="section-sub">Interactive visualizations of model performance across all turbines and horizons</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="chart-wrapper" style="min-height:340px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">R&sup2; Score by Horizon (LightGBM)</div>
+        <canvas id="chartR2Decay"></canvas>
+      </div>
+      <div class="chart-wrapper" style="min-height:340px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">Model Comparison: LightGBM vs XGBoost</div>
+        <canvas id="chartModelCompare"></canvas>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="chart-wrapper" style="min-height:340px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">RMSE by Horizon (All Turbines Avg)</div>
+        <canvas id="chartRMSE"></canvas>
+      </div>
+      <div class="chart-wrapper" style="min-height:340px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">Turbine Availability</div>
+        <canvas id="chartAvail"></canvas>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
+      <div class="chart-wrapper" style="min-height:380px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">R&sup2; Heatmap: Turbine &times; Horizon (LightGBM)</div>
+        <canvas id="chartHeatmap"></canvas>
+      </div>
+      <div class="chart-wrapper" style="min-height:380px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">Metric Distribution</div>
+        <canvas id="chartRadar"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- Evaluation Table -->
+  <section class="section eval-section">
+    <div class="section-head">
+      <div>
+        <div class="section-title">Model Evaluation Metrics</div>
+        <div class="section-sub">Walk-forward validation results across all turbines and horizons</div>
+      </div>
+    </div>
+    <div class="table-scroll" id="evalTableWrap">
+      <table class="eval-table" id="evalTable">
+        <thead><tr><th>Turbine</th><th>Model</th><th>Horizon</th><th>R&sup2;</th><th>MAE (kW)</th><th>RMSE (kW)</th><th>NRMSE (%)</th><th>Skill Score</th></tr></thead>
+        <tbody id="evalBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  AMG Wind Farm Forecasting &mdash; FastAPI + XGBoost + LightGBM + SHAP
+</footer>
+
+<script>
+const API = '';
+let turbines = [], selectedTurbine = 'TB01', resultChart = null, resultCIChart = null, resultWaterfall = null;
+
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); throw new Error(e.detail||'Request failed'); }
+  return r.json();
+}
+
+function showLoading(v) { document.getElementById('loading').classList.toggle('hidden', !v); }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.innerHTML = '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg> ' + msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+function availColor(pct) {
+  if (pct >= 86) return 'var(--green)';
+  if (pct >= 83) return 'var(--orange)';
+  return 'var(--red)';
+}
+function availBg(pct) {
+  if (pct >= 86) return 'var(--green-bg)';
+  if (pct >= 83) return 'var(--orange-bg)';
+  return 'var(--red-bg)';
+}
+function r2BadgeClass(v) {
+  if (v >= 0.8) return 'r2-high';
+  if (v >= 0.5) return 'r2-mid';
+  return 'r2-low';
+}
+
+async function loadTurbines() {
+  turbines = await api('/turbines');
+  const avg = turbines.reduce((s,t)=>s+t.availability_pct,0)/turbines.length;
+  const cap = turbines.length * 2200;
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon blue"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14"/></svg></div><div class="stat-info"><div class="value">${turbines.length}</div><div class="label">Turbines</div></div></div>
+    <div class="stat-card"><div class="stat-icon green"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div><div class="stat-info"><div class="value">2,200 <small style="font-size:.7em;font-weight:500;color:var(--text-muted)">kW</small></div><div class="label">Rated Power Each</div></div></div>
+    <div class="stat-card"><div class="stat-icon purple"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"/></svg></div><div class="stat-info"><div class="value">${(cap/1000).toFixed(1)} <small style="font-size:.7em;font-weight:500;color:var(--text-muted)">MW</small></div><div class="label">Farm Capacity</div></div></div>
+    <div class="stat-card"><div class="stat-icon orange"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div class="stat-info"><div class="value" style="color:${availColor(avg)}">${avg.toFixed(1)}%</div><div class="label">Avg Availability</div></div></div>
+  `;
+
+  document.getElementById('statusText').textContent = `${turbines.length} turbines online \u00b7 142 models loaded`;
+
+  const grid = document.getElementById('turbineGrid');
+  const sel = document.getElementById('selTurbine');
+  grid.innerHTML = ''; sel.innerHTML = '';
+
+  turbines.forEach(tb => {
+    sel.innerHTML += `<option value="${tb.id}">${tb.id}</option>`;
+    const card = document.createElement('div');
+    card.className = 'turbine-card' + (tb.id===selectedTurbine?' active':'');
+    card.dataset.id = tb.id;
+    card.onclick = () => selectTurbine(tb.id);
+    card.innerHTML = `
+      <div class="tb-top"><span class="tb-id">${tb.id}</span><span class="tb-dot" style="background:${availColor(tb.availability_pct)}"></span></div>
+      <div class="tb-avail" style="color:${availColor(tb.availability_pct)}">${tb.availability_pct.toFixed(1)}<span style="font-size:.55em;font-weight:500;color:var(--text-muted)">%</span></div>
+      <div class="tb-bar"><div class="tb-bar-fill" style="width:${tb.availability_pct}%;background:${availColor(tb.availability_pct)}"></div></div>
+      <div class="tb-stats"><span>\u26a1 ${tb.generating_hours.toFixed(0)}h</span><span>\u23f8 ${tb.stopped_hours.toFixed(0)}h</span></div>
+    `;
+    grid.appendChild(card);
+  });
+  sel.value = selectedTurbine;
+}
+
+function selectTurbine(id) {
+  selectedTurbine = id;
+  document.getElementById('selTurbine').value = id;
+  document.querySelectorAll('.turbine-card').forEach(c=>c.classList.toggle('active',c.dataset.id===id));
+}
+document.getElementById('selTurbine').addEventListener('change', e=>selectTurbine(e.target.value));
+
+function fillSample() {
+  document.getElementById('inWind').value = (5+Math.random()*10).toFixed(1);
+  document.getElementById('inTemp').value = (12+Math.random()*18).toFixed(1);
+  document.getElementById('inFreq').value = (49.8+Math.random()*.4).toFixed(2);
+  document.getElementById('inPower').value = Math.floor(500+Math.random()*1500);
+  document.getElementById('inLag1').value = Math.floor(400+Math.random()*1600);
+  document.getElementById('inLag6').value = Math.floor(300+Math.random()*1700);
+  document.getElementById('inHour').value = new Date().getHours();
+  document.getElementById('inMonth').value = new Date().getMonth()+1;
+}
+
+async function runPredict() {
+  const btn = document.getElementById('btnPredict');
+  btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0"></div> Predicting...';
+  showLoading(true);
+
+  const body = {
+    turbine_id: document.getElementById('selTurbine').value,
+    wind_speed: parseFloat(document.getElementById('inWind').value)||8,
+    temperature: parseFloat(document.getElementById('inTemp').value)||22,
+    frequency: parseFloat(document.getElementById('inFreq').value)||50,
+    power: parseFloat(document.getElementById('inPower').value)||1000,
+    power_lag1: parseFloat(document.getElementById('inLag1').value)||null,
+    power_lag6: parseFloat(document.getElementById('inLag6').value)||null,
+    hour_of_day: parseInt(document.getElementById('inHour').value)||12,
+    month: parseInt(document.getElementById('inMonth').value)||6,
+    model_type: document.getElementById('selModel').value,
+  };
+
+  try {
+    const data = await api('/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    renderResults(data);
+  } catch(e) { showToast(e.message); }
+  finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg class="btn-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Predict Power Output';
+    showLoading(false);
+  }
+}
+
+const HC = ['#059669','#2563eb','#7c3aed','#d97706','#dc2626'];
+const HN = ['10 min','30 min','1 hour','6 hours','24 hours'];
+
+function renderResults(data) {
+  const sec = document.getElementById('resultsSection');
+  sec.classList.add('show');
+  const mdl = data.predictions[0]?.model_type.toUpperCase() || '';
+  document.getElementById('resultsSub').textContent = `${data.turbine_id} \u2014 ${mdl} model`;
+
+  const grid = document.getElementById('resultsGrid');
+  grid.innerHTML = '';
+  const labels=[], preds=[], lowers=[], uppers=[];
+
+  data.predictions.forEach((p,i) => {
+    const ciW = ((p.confidence_upper_kw-p.confidence_lower_kw)/2200*100);
+    const predPct = (p.predicted_power_kw/2200*100).toFixed(1);
+    const pctOfRated = ((p.predicted_power_kw/2200)*100).toFixed(0);
+
+    grid.innerHTML += `
+      <div class="result-card">
+        <div class="horizon-label" style="color:${HC[i]}">${HN[i]}</div>
+        <div class="power-val" style="color:${HC[i]}">${p.predicted_power_kw.toFixed(0)}</div>
+        <div class="power-unit">${pctOfRated}% of rated (2,200 kW)</div>
+        <div class="ci-range">${p.confidence_lower_kw.toFixed(0)} \u2013 ${p.confidence_upper_kw.toFixed(0)} kW</div>
+        <div class="ci-bar">
+          <div class="ci-fill" style="left:${(p.confidence_lower_kw/2200*100).toFixed(1)}%;width:${ciW.toFixed(1)}%;background:${HC[i]}"></div>
+          <div class="ci-marker" style="left:${predPct}%;background:${HC[i]}"></div>
+        </div>
+      </div>`;
+
+    labels.push(HN[i]); preds.push(p.predicted_power_kw);
+    lowers.push(p.confidence_lower_kw); uppers.push(p.confidence_upper_kw);
+  });
+
+  // ── Estimation Panel ──
+  var ep = document.getElementById('estimationPanel');
+  var eg = document.getElementById('estGrid');
+  ep.style.display = 'block';
+
+  var avgPower = preds.reduce(function(a,b){return a+b;},0)/preds.length;
+  var nowPower = preds[0];
+  var rated = 2200;
+
+  // Annual energy estimate (if turbine ran at predicted power)
+  var annualMWh = (nowPower * 8760 / 1000).toFixed(0);
+  var annualMWhBest = (rated * 8760 / 1000).toFixed(0);
+
+  // Revenue at ~$50/MWh (typical onshore wind)
+  var revenueAnnual = (nowPower * 8760 / 1000 * 50).toFixed(0);
+
+  // Homes powered (~10 MWh/home/year)
+  var homes = Math.max(1, Math.floor(nowPower * 8760 / 1000 / 10));
+
+  // CO2 avoided (~0.4 tonnes CO2 per MWh displaced from coal)
+  var co2 = (nowPower * 8760 / 1000 * 0.4).toFixed(0);
+
+  // Capacity factor
+  var capFactor = ((nowPower / rated) * 100).toFixed(1);
+
+  eg.innerHTML = `
+    <div class="est-card">
+      <div class="est-icon">\u26a1</div>
+      <div class="est-val">${annualMWh.toLocaleString()} MWh</div>
+      <div class="est-label">Est. Annual Energy</div>
+      <div class="est-desc">If this turbine keeps producing at ${nowPower.toFixed(0)} kW, it would generate ${annualMWh} MWh in a year. Rated capacity would produce ${annualMWhBest} MWh.</div>
+    </div>
+    <div class="est-card">
+      <div class="est-icon">\ud83d\udcb0</div>
+      <div class="est-val">$${Number(revenueAnnual).toLocaleString()}</div>
+      <div class="est-label">Est. Annual Revenue</div>
+      <div class="est-desc">Based on an average wholesale electricity price of $50/MWh. Actual revenue depends on market prices, PPAs, and grid location.</div>
+    </div>
+    <div class="est-card">
+      <div class="est-icon">\ud83c\udfe0</div>
+      <div class="est-val">${homes.toLocaleString()} homes</div>
+      <div class="est-label">Homes Powered</div>
+      <div class="est-desc">Average household consumes ~10 MWh/year. This turbine\u2019s current output could power approximately ${homes} homes continuously.</div>
+    </div>
+    <div class="est-card">
+      <div class="est-icon">\ud83c\udf33</div>
+      <div class="est-val">${Number(co2).toLocaleString()} t CO\u2082</div>
+      <div class="est-label">CO\u2082 Avoided / Year</div>
+      <div class="est-desc">Wind energy displaces fossil fuels. Each MWh of wind avoids ~0.4 tonnes of CO\u2082 compared to coal-fired generation.</div>
+    </div>
+    <div class="est-card">
+      <div class="est-icon">\ud83d\udcc9</div>
+      <div class="est-val">${capFactor}%</div>
+      <div class="est-label">Capacity Factor</div>
+      <div class="est-desc">Ratio of actual output to rated capacity (${rated} kW). Onshore wind typically achieves 25\u201345%. Current prediction: ${capFactor}%.</div>
+    </div>
+  `;
+
+  if(resultChart) resultChart.destroy();
+  if(resultCIChart) resultCIChart.destroy();
+  if(resultWaterfall) resultWaterfall.destroy();
+
+    const chartFont = {family:'Inter,system-ui,sans-serif'};
+
+  // Chart 1: Gradient bars
+  const ctx1 = document.getElementById('resultChart').getContext('2d');
+  const gradients = HC.map((c) => {
+    const g = ctx1.createLinearGradient(0,0,0,350);
+    g.addColorStop(0, c+'ee');
+    g.addColorStop(1, c+'55');
+    return g;
+  });
+
+  resultChart = new Chart(ctx1, {
+    type:'bar',
+    data:{
+      labels: labels,
+      datasets:[{
+        label:'Predicted Power (kW)',
+        data: preds,
+        backgroundColor: gradients,
+        borderColor: HC,
+        borderWidth: 2,
+        borderRadius: {topLeft:8,topRight:8,bottomLeft:0,bottomRight:0},
+        barPercentage: .6,
+      }]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      animation:{duration:400,easing:'easeOutQuart'},
+      layout:{padding:{top:30,right:8}},
+      interaction:{mode:'index',intersect:true},
+      plugins:{
+        legend:{display:false},
+        title:{display:true,text:'Predicted Power Output',color:'#1e293b',font:{...chartFont,size:14,weight:'700'},padding:{bottom:12}},
+        tooltip:{
+          enabled:true,
+          backgroundColor:'#1e293b',
+          titleFont:{...chartFont,size:13,weight:'600'},bodyFont:{...chartFont,size:12},
+          padding:12,cornerRadius:8,
+          displayColors:false,
+          callbacks:{
+            title:function(ctx){return 'Horizon: '+ctx[0].label;},
+            label:function(ctx){return 'Power: '+ctx.parsed.y.toFixed(1)+' kW ('+((ctx.parsed.y/2200)*100).toFixed(0)+'% of rated)';}
+          }
+        }
+      },
+      scales:{
+        y:{
+          beginAtZero:true,max:2500,
+          grid:{color:'#f1f5f9',drawTicks:false},
+          ticks:{color:'#94a3b8',font:{...chartFont,size:11},callback:function(v){return v>=1000?(v/1000).toFixed(1)+'k':v;}},
+          border:{display:false},
+          title:{display:true,text:'Power (kW)',color:'#94a3b8',font:{...chartFont,size:11,weight:'500'}}
+        },
+        x:{grid:{display:false},ticks:{color:'#475569',font:{...chartFont,size:12,weight:'600'}},border:{display:false}}
+      }
+    }
+  });
+
+  // Chart 2: CI area chart
+  var ciUpperBg = [];
+  var ciLowerBg = [];
+  for(var i=0;i<preds.length;i++){
+    ciUpperBg.push(uppers[i]);
+    ciLowerBg.push(lowers[i]);
+  }
+
+  const ctx2 = document.getElementById('resultCIChart').getContext('2d');
+  var ciGradient = ctx2.createLinearGradient(0,0,0,350);
+  ciGradient.addColorStop(0,'rgba(37,99,235,.15)');
+  ciGradient.addColorStop(1,'rgba(37,99,235,.02)');
+
+  resultCIChart = new Chart(ctx2, {
+    type:'line',
+    data:{
+      labels: labels,
+      datasets:[
+        {
+          label:'Upper CI',
+          data: uppers,
+          borderColor:'transparent',
+          backgroundColor:ciGradient,
+          fill:true,
+          borderWidth:0,
+          pointRadius:0,
+          tension:.3
+        },
+        {
+          label:'Predicted',
+          data: preds,
+          borderColor:'#2563eb',
+          backgroundColor:'transparent',
+          fill:false,
+          borderWidth:3,
+          pointRadius:6,
+          pointBackgroundColor:'#fff',
+          pointBorderColor:'#2563eb',
+          pointBorderWidth:2.5,
+          pointHoverRadius:8,
+          tension:.3
+        },
+        {
+          label:'Lower CI',
+          data: lowers,
+          borderColor:'transparent',
+          backgroundColor:'#f8fafc',
+          fill:true,
+          borderWidth:0,
+          pointRadius:0,
+          tension:.3
+        }
+      ]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      animation:{duration:400,easing:'easeOutQuart'},
+      interaction:{mode:'index',intersect:true},
+      plugins:{
+        legend:{display:false},
+        title:{display:true,text:'Confidence Interval Over Horizon',color:'#1e293b',font:{...chartFont,size:14,weight:'700'},padding:{bottom:12}},
+        tooltip:{
+          enabled:true,
+          backgroundColor:'#1e293b',
+          titleFont:{...chartFont,size:13,weight:'600'},bodyFont:{...chartFont,size:12},
+          padding:12,cornerRadius:8,
+          displayColors:false,
+          filter:function(item){return item.datasetIndex===1;},
+          callbacks:{
+            title:function(ctx){return 'Horizon: '+ctx[0].label;},
+            label:function(ctx){
+              var idx=ctx.dataIndex;
+              return [
+                'Predicted: '+ctx.parsed.y.toFixed(1)+' kW',
+                'Upper CI: '+uppers[idx].toFixed(0)+' kW',
+                'Lower CI: '+lowers[idx].toFixed(0)+' kW',
+                'CI Width: '+(uppers[idx]-lowers[idx]).toFixed(0)+' kW'
+              ];
+            }
+          }
+        }
+      },
+      scales:{
+        y:{
+          beginAtZero:true,max:2500,
+          grid:{color:'#f1f5f9',drawTicks:false},
+          ticks:{color:'#94a3b8',font:{...chartFont,size:11},callback:function(v){return v>=1000?(v/1000).toFixed(1)+'k':v;}},
+          border:{display:false},
+          title:{display:true,text:'Power (kW)',color:'#94a3b8',font:{...chartFont,size:11,weight:'500'}}
+        },
+        x:{grid:{display:false},ticks:{color:'#475569',font:{...chartFont,size:12,weight:'600'}},border:{display:false}}
+      }
+    }
+  });
+
+  // Chart 3: Waterfall
+  var changes=[], bases=[];
+  for(var i=0;i<preds.length;i++){
+    changes.push(i===0?preds[0]:preds[i]-preds[i-1]);
+    bases.push(i===0?0:preds[i-1]);
+  }
+  var wfLabels=HN.map(function(h,i){return i===0?'Now \u2192 '+h:'\u2192 '+h;});
+  var wfBgColors=changes.map(function(v,i){return i===0?HC[0]+'cc':v<0?'#dc262688':'#05966988';});
+  var wfBorders=changes.map(function(v,i){return i===0?HC[0]:v<0?'#dc2626':'#059669';});
+
+  const ctx3 = document.getElementById('resultWaterfall').getContext('2d');
+  resultWaterfall = new Chart(ctx3, {
+    type:'bar',
+    data:{
+      labels:wfLabels,
+      datasets:[
+        {label:'Base',data:bases,backgroundColor:'transparent',borderWidth:0,barPercentage:.5},
+        {label:'Change',data:changes.map(function(v){return Math.abs(v);}),backgroundColor:wfBgColors,borderColor:wfBorders,borderWidth:2,borderRadius:6,barPercentage:.5}
+      ]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      animation:{duration:400,easing:'easeOutQuart'},
+      interaction:{mode:'index',intersect:true},
+      plugins:{
+        legend:{display:false},
+        title:{display:true,text:'Power Change Between Horizons',color:'#1e293b',font:{...chartFont,size:14,weight:'700'},padding:{bottom:12}},
+        tooltip:{
+          enabled:true,
+          backgroundColor:'#1e293b',
+          titleFont:{...chartFont,size:13,weight:'600'},bodyFont:{...chartFont,size:12},
+          padding:12,cornerRadius:8,
+          displayColors:false,
+          filter:function(item){return item.datasetIndex===1;},
+          callbacks:{
+            title:function(ctx){return ctx[0].label;},
+            label:function(ctx){
+              var i=ctx.dataIndex;
+              var ch=changes[i];
+              if(i===0) return 'Starting: '+preds[0].toFixed(0)+' kW';
+              var sign=ch>0?'+':'';
+              var pct=((ch/preds[i-1])*100).toFixed(1);
+              return sign+ch.toFixed(0)+' kW ('+pct+'%)';
+            }
+          }
+        }
+      },
+      scales:{
+        x:{stacked:true,grid:{display:false},ticks:{color:'#475569',font:{...chartFont,size:11,weight:'600'}},border:{display:false}},
+        y:{stacked:true,beginAtZero:true,max:2500,grid:{color:'#f1f5f9',drawTicks:false},ticks:{color:'#94a3b8',font:{...chartFont,size:11},callback:function(v){return v>=1000?(v/1000).toFixed(1)+'k':v;}},border:{display:false},
+          title:{display:true,text:'Cumulative Power (kW)',color:'#94a3b8',font:{...chartFont,size:11,weight:'500'}}}
+      }
+    }
+  });
+
+  sec.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function init() {
+  showLoading(true);
+  try {
+    const evalData = await api('/evaluations');
+    const turbData = await api('/turbines');
+    await loadTurbines();
+    loadEvalFromData(evalData);
+    buildCharts(evalData, turbData);
+  } catch(e) { showToast('Failed to load: '+e.message); }
+  finally { showLoading(false); }
+}
+
+function loadEvalFromData(rows) {
+  const body = document.getElementById('evalBody');
+  body.innerHTML = rows.map(r => {
+    const tb = r.target ? r.target.replace('_power_target_'+r.horizon,'').replace('_power','') : '';
+    const r2 = r.r2 != null ? r.r2 : 0;
+    return `<tr>
+      <td><strong>${tb}</strong></td>
+      <td>${r.model||''}</td>
+      <td>${r.horizon||''}</td>
+      <td><span class="r2-badge ${r2BadgeClass(r2)}">${r2.toFixed(4)}</span></td>
+      <td>${r.mae!=null?r.mae.toFixed(1):''}</td>
+      <td>${r.rmse!=null?r.rmse.toFixed(1):''}</td>
+      <td>${r.nrmse_pct!=null?r.nrmse_pct.toFixed(2):''}</td>
+      <td>${r.skill_score!=null?r.skill_score.toFixed(4):''}</td>
+    </tr>`;
+  }).join('');
+}
+
+const HO = ['10min','30min','1hour','6hour','24hour'];
+const HNL = ['10 min','30 min','1 hour','6 hours','24 hours'];
+const COLORS = {lgbm:'#2563eb',xgb:'#7c3aed',green:'#059669',orange:'#d97706',red:'#dc2626'};
+
+function buildCharts(evalData, turbData) {
+  buildR2Decay(evalData);
+  buildModelCompare(evalData);
+  buildRMSE(evalData);
+  buildAvail(turbData);
+  buildHeatmap(evalData);
+  buildRadar(evalData);
+}
+
+function buildR2Decay(data) {
+  const lgbm = data.filter(r=>r.model==='lightgbm'&&!r.target.includes('farm'));
+  const avg = HO.map(h => {
+    const rows = lgbm.filter(r=>r.horizon===h);
+    return rows.reduce((s,r)=>s+(r.r2||0),0)/rows.length;
+  });
+  const xgb = data.filter(r=>r.model==='xgboost'&&!r.target.includes('farm'));
+  const avgX = HO.map(h => {
+    const rows = xgb.filter(r=>r.horizon===h);
+    return rows.reduce((s,r)=>s+(r.r2||0),0)/rows.length;
+  });
+
+  new Chart(document.getElementById('chartR2Decay'), {
+    type:'line',
+    data:{labels:HNL,datasets:[
+      {label:'LightGBM',data:avg,borderColor:COLORS.lgbm,backgroundColor:COLORS.lgbm+'18',fill:true,tension:.3,pointRadius:5,pointBackgroundColor:COLORS.lgbm,borderWidth:2.5},
+      {label:'XGBoost',data:avgX,borderColor:COLORS.xgb,backgroundColor:COLORS.xgb+'18',fill:true,tension:.3,pointRadius:5,pointBackgroundColor:COLORS.xgb,borderWidth:2.5,borderDash:[6,3]},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#475569',font:{size:11,weight:'500'},usePointStyle:true}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: R\u00b2 = ${ctx.parsed.y.toFixed(4)}`}}},
+      scales:{y:{min:0,max:1,grid:{color:'#f1f5f9'},ticks:{color:'#94a3b8',callback:v=>v.toFixed(1)},border:{color:'#e2e8f0'}},x:{grid:{display:false},ticks:{color:'#475569',font:{size:11,weight:'500'}},border:{display:false}}}
+    }
+  });
+}
+
+function buildModelCompare(data) {
+  const tbOnly = data.filter(r=>!r.target.includes('farm'));
+  const lgbmAvg = HO.map(h => {
+    const rows = tbOnly.filter(r=>r.model==='lightgbm'&&r.horizon===h);
+    return rows.reduce((s,r)=>s+(r.r2||0),0)/rows.length;
+  });
+  const xgbAvg = HO.map(h => {
+    const rows = tbOnly.filter(r=>r.model==='xgboost'&&r.horizon===h);
+    return rows.reduce((s,r)=>s+(r.r2||0),0)/rows.length;
+  });
+
+  new Chart(document.getElementById('chartModelCompare'), {
+    type:'bar',
+    data:{labels:HNL,datasets:[
+      {label:'LightGBM',data:lgbmAvg,backgroundColor:COLORS.lgbm+'bb',borderColor:COLORS.lgbm,borderWidth:2,borderRadius:6,barPercentage:.35,categoryPercentage:.7},
+      {label:'XGBoost',data:xgbAvg,backgroundColor:COLORS.xgb+'bb',borderColor:COLORS.xgb,borderWidth:2,borderRadius:6,barPercentage:.35,categoryPercentage:.7},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#475569',font:{size:11,weight:'500'},usePointStyle:true}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: R\u00b2 = ${ctx.parsed.y.toFixed(4)}`}}},
+      scales:{y:{min:0,max:1,grid:{color:'#f1f5f9'},ticks:{color:'#94a3b8',callback:v=>v.toFixed(1)},border:{color:'#e2e8f0'}},x:{grid:{display:false},ticks:{color:'#475569',font:{size:11,weight:'500'}},border:{display:false}}}
+    }
+  });
+}
+
+function buildRMSE(data) {
+  const tbOnly = data.filter(r=>!r.target.includes('farm'));
+  const lgbm = HO.map(h => {
+    const rows = tbOnly.filter(r=>r.model==='lightgbm'&&r.horizon===h);
+    return rows.reduce((s,r)=>s+(r.rmse||0),0)/rows.length;
+  });
+  const xgb = HO.map(h => {
+    const rows = tbOnly.filter(r=>r.model==='xgboost'&&r.horizon===h);
+    return rows.reduce((s,r)=>s+(r.rmse||0),0)/rows.length;
+  });
+
+  new Chart(document.getElementById('chartRMSE'), {
+    type:'bar',
+    data:{labels:HNL,datasets:[
+      {label:'LightGBM RMSE',data:lgbm,backgroundColor:['#059669cc','#2563ebcc','#7c3aedcc','#d97706cc','#dc2626cc'],borderColor:['#059669','#2563eb','#7c3aed','#d97706','#dc2626'],borderWidth:2,borderRadius:8,barPercentage:.5},
+      {label:'XGBoost RMSE',data:xgb,backgroundColor:['#05966955','#2563eb55','#7c3aed55','#d9770655','#dc262655'],borderColor:['#059669','#2563eb','#7c3aed','#d97706','#dc2626'],borderWidth:1.5,borderRadius:8,barPercentage:.5},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#475569',font:{size:11,weight:'500'},usePointStyle:true}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} kW`}}},
+      scales:{y:{beginAtZero:true,grid:{color:'#f1f5f9'},ticks:{color:'#94a3b8',callback:v=>v.toFixed(0)+' kW'},border:{color:'#e2e8f0'}},x:{grid:{display:false},ticks:{color:'#475569',font:{size:11,weight:'500'}},border:{display:false}}}
+    }
+  });
+}
+
+function buildAvail(turbData) {
+  const labels = turbData.map(t=>t.id);
+  const vals = turbData.map(t=>t.availability_pct);
+  const cols = vals.map(v => v>=86?'#059669cc':v>=83?'#d97706cc':'#dc2626cc');
+  const borders = vals.map(v => v>=86?'#059669':v>=83?'#d97706':'#dc2626');
+
+  new Chart(document.getElementById('chartAvail'), {
+    type:'bar',
+    data:{labels,datasets:[{
+      label:'Availability %',data:vals,backgroundColor:cols,borderColor:borders,borderWidth:2,borderRadius:8,barPercentage:.6
+    }]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y.toFixed(1)}% availability`}}},
+      scales:{y:{min:70,max:95,grid:{color:'#f1f5f9'},ticks:{color:'#94a3b8',callback:v=>v+'%'},border:{color:'#e2e8f0'}},x:{grid:{display:false},ticks:{color:'#475569',font:{size:10,weight:'600'}},border:{display:false}}}
+    }
+  });
+}
+
+function buildHeatmap(data) {
+  const lgbm = data.filter(r=>r.model==='lightgbm'&&!r.target.includes('farm'));
+  const tbs = [...new Set(lgbm.map(r=>{const m=r.target.match(/^(TB\d+)/);return m?m[1]:null}).filter(Boolean))].sort();
+  const canvas = document.getElementById('chartHeatmap');
+  const ctx = canvas.getContext('2d');
+  const rows=tbs.length, cols=HO.length;
+  const pad={top:30,left:50,right:20,bottom:20};
+  const w=Math.max(500,canvas.parentElement.clientWidth-60);
+  const h=Math.max(280,tbs.length*28+pad.top+pad.bottom);
+  canvas.width=w*2;canvas.height=h*2;canvas.style.width=w+'px';canvas.style.height=h+'px';
+  ctx.scale(2,2);
+  const cw=(w-pad.left-pad.right)/cols;
+  const ch=(h-pad.top-pad.bottom)/rows;
+
+  ctx.fillStyle='#1e293b';ctx.font='bold 11px Inter,sans-serif';
+  HO.forEach((ho,i)=>{ctx.fillText(HNL[i],pad.left+i*cw+cw/2-20,pad.top-10)});
+  tbs.forEach((tb,r)=>{ctx.fillText(tb,2,pad.top+r*ch+ch/2+4)});
+
+  lgbm.forEach(r=>{
+    const ti=tbs.indexOf(r.target.match(/^(TB\d+)/)?.[1]);
+    const hi=HO.indexOf(r.horizon);
+    if(ti<0||hi<0)return;
+    const x=pad.left+hi*cw+2;
+    const y=pad.top+ti*ch+2;
+    const v=Math.max(0,Math.min(1,r.r2||0));
+    const g=Math.floor(v*200);
+    ctx.fillStyle=`rgba(${Math.round(220-v*200)},${60+g},${Math.round(100+v*100)},.85)`;
+    ctx.beginPath();ctx.roundRect(x,y,cw-4,ch-4,4);ctx.fill();
+    ctx.fillStyle=v>.5?'#fff':'#1e293b';ctx.font='bold 9px Inter,sans-serif';
+    ctx.fillText(v.toFixed(2),x+cw/2-14,y+ch/2+3);
+  });
+}
+
+function buildRadar(data) {
+  const tbOnly = data.filter(r=>!r.target.includes('farm')&&r.model==='lightgbm');
+  const metrics = ['r2','skill_score'];
+  const metricLabels = ['R\u00b2 Score','Skill Score'];
+  const avgPerHorizon = HO.map((h,hi) => {
+    const rows = tbOnly.filter(r=>r.horizon===h);
+    const avgR2 = rows.reduce((s,r)=>s+(r.r2||0),0)/rows.length;
+    const avgSkill = rows.reduce((s,r)=>s+(r.skill_score||0),0)/rows.length;
+    return [avgR2, Math.max(0,avgSkill)];
+  });
+
+  new Chart(document.getElementById('chartRadar'), {
+    type:'radar',
+    data:{labels:HNL,datasets:[
+      {label:'R\u00b2',data:avgPerHorizon.map(v=>v[0]),borderColor:COLORS.lgbm,backgroundColor:COLORS.lgbm+'22',pointBackgroundColor:COLORS.lgbm,borderWidth:2,pointRadius:4},
+      {label:'Skill Score',data:avgPerHorizon.map(v=>v[1]),borderColor:COLORS.green,backgroundColor:COLORS.green+'22',pointBackgroundColor:COLORS.green,borderWidth:2,pointRadius:4},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#475569',font:{size:11,weight:'500'},usePointStyle:true}}},
+      scales:{r:{min:0,max:1,ticks:{display:false},grid:{color:'#e2e8f0'},pointLabels:{color:'#475569',font:{size:10,weight:'600'}},angleLines:{color:'#e2e8f0'}}}
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>

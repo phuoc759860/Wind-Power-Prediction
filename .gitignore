@@ -1,0 +1,29 @@
+# Data
+data/raw/*
+data/processed/*
+data/*.parquet
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Logs
+logs/
+*.log
+
+# Generated outputs
+outputs/
+!outputs/.gitkeep
+
+# Generated xlsx
+xlsx/*
+convert_xlsx/*
+!xlsx/.gitkeep
+!convert_xlsx/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db

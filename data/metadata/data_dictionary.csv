@@ -1,0 +1,50 @@
+original_column,standardized_name,turbine_id,measurement_type,unit,data_type,null_count,null_pct,role
+PCTimeStamp,timestamp,,unknown,unknown,datetime64[ns],0,0.0,auxiliary
+TB01_Ambient WindSpeed Avg. (1),TB01_wind_speed,TB01,wind_speed,m/s,float64,1288,0.44,feature
+TB02_Ambient WindSpeed Avg. (2),TB02_wind_speed,TB02,wind_speed,m/s,float64,1110,0.38,feature
+TB03_Ambient WindSpeed Avg. (3),TB03_wind_speed,TB03,wind_speed,m/s,float64,2616,0.89,feature
+TB04_Ambient WindSpeed Avg. (4),TB04_wind_speed,TB04,wind_speed,m/s,float64,949,0.32,feature
+TB05_Ambient WindSpeed Avg. (5),TB05_wind_speed,TB05,wind_speed,m/s,float64,13979,4.78,feature
+TB06_Ambient WindSpeed Avg. (6),TB06_wind_speed,TB06,wind_speed,m/s,float64,935,0.32,feature
+TB07_Ambient WindSpeed Avg. (7),TB07_wind_speed,TB07,wind_speed,m/s,float64,1517,0.52,feature
+TB08_Ambient WindSpeed Avg. (8),TB08_wind_speed,TB08,wind_speed,m/s,float64,921,0.31,feature
+TB09_Ambient WindSpeed Avg. (9),TB09_wind_speed,TB09,wind_speed,m/s,float64,3036,1.04,feature
+TB10_Ambient WindSpeed Avg. (10),TB10_wind_speed,TB10,wind_speed,m/s,float64,1759,0.6,feature
+TB11_Ambient WindSpeed Avg. (11),TB11_wind_speed,TB11,wind_speed,m/s,float64,1150,0.39,feature
+TB12_Ambient WindSpeed Avg. (12),TB12_wind_speed,TB12,wind_speed,m/s,float64,2521,0.86,feature
+TB01_Ambient Temp. Avg. (13),TB01_temperature,TB01,temperature,°C,float64,1288,0.44,feature
+TB02_Ambient Temp. Avg. (14),TB02_temperature,TB02,temperature,°C,float64,1110,0.38,feature
+TB03_Ambient Temp. Avg. (15),TB03_temperature,TB03,temperature,°C,float64,2616,0.89,feature
+TB04_Ambient Temp. Avg. (16),TB04_temperature,TB04,temperature,°C,float64,949,0.32,feature
+TB05_Ambient Temp. Avg. (17),TB05_temperature,TB05,temperature,°C,float64,13979,4.78,feature
+TB06_Ambient Temp. Avg. (18),TB06_temperature,TB06,temperature,°C,float64,935,0.32,feature
+TB07_Ambient Temp. Avg. (19),TB07_temperature,TB07,temperature,°C,float64,1517,0.52,feature
+TB08_Ambient Temp. Avg. (20),TB08_temperature,TB08,temperature,°C,float64,921,0.31,feature
+TB09_Ambient Temp. Avg. (21),TB09_temperature,TB09,temperature,°C,float64,3036,1.04,feature
+TB10_Ambient Temp. Avg. (22),TB10_temperature,TB10,temperature,°C,float64,1759,0.6,feature
+TB11_Ambient Temp. Avg. (23),TB11_temperature,TB11,temperature,°C,float64,1150,0.39,feature
+TB12_Ambient Temp. Avg. (24),TB12_temperature,TB12,temperature,°C,float64,2521,0.86,feature
+TB01_Grid Production Power Avg. (25),TB01_power,TB01,power,kW,float64,1288,0.44,target
+TB02_Grid Production Power Avg. (26),TB02_power,TB02,power,kW,float64,1110,0.38,target
+TB03_Grid Production Power Avg. (27),TB03_power,TB03,power,kW,float64,2616,0.89,target
+TB04_Grid Production Power Avg. (28),TB04_power,TB04,power,kW,float64,949,0.32,target
+TB05_Grid Production Power Avg. (29),TB05_power,TB05,power,kW,float64,13979,4.78,target
+TB06_Grid Production Power Avg. (30),TB06_power,TB06,power,kW,float64,935,0.32,target
+TB07_Grid Production Power Avg. (31),TB07_power,TB07,power,kW,float64,1517,0.52,target
+TB08_Grid Production Power Avg. (32),TB08_power,TB08,power,kW,float64,921,0.31,target
+TB09_Grid Production Power Avg. (33),TB09_power,TB09,power,kW,float64,3036,1.04,target
+TB10_Grid Production Power Avg. (34),TB10_power,TB10,power,kW,float64,1759,0.6,target
+TB11_Grid Production Power Avg. (35),TB11_power,TB11,power,kW,float64,1150,0.39,target
+TB12_Grid Production Power Avg. (36),TB12_power,TB12,power,kW,float64,2521,0.86,target
+TB01_Grid Production Frequency Avg. (37),TB01_frequency,TB01,frequency,Hz,float64,1288,0.44,auxiliary
+TB02_Grid Production Frequency Avg. (38),TB02_frequency,TB02,frequency,Hz,float64,1110,0.38,auxiliary
+TB03_Grid Production Frequency Avg. (39),TB03_frequency,TB03,frequency,Hz,float64,2616,0.89,auxiliary
+TB04_Grid Production Frequency Avg. (40),TB04_frequency,TB04,frequency,Hz,float64,949,0.32,auxiliary
+TB05_Grid Production Frequency Avg. (41),TB05_frequency,TB05,frequency,Hz,float64,13979,4.78,auxiliary
+TB06_Grid Production Frequency Avg. (42),TB06_frequency,TB06,frequency,Hz,float64,935,0.32,auxiliary
+TB07_Grid Production Frequency Avg. (43),TB07_frequency,TB07,frequency,Hz,float64,1517,0.52,auxiliary
+TB08_Grid Production Frequency Avg. (44),TB08_frequency,TB08,frequency,Hz,float64,921,0.31,auxiliary
+TB09_Grid Production Frequency Avg. (45),TB09_frequency,TB09,frequency,Hz,float64,3036,1.04,auxiliary
+TB10_Grid Production Frequency Avg. (46),TB10_frequency,TB10,frequency,Hz,float64,1759,0.6,auxiliary
+TB11_Grid Production Frequency Avg. (47),TB11_frequency,TB11,frequency,Hz,float64,1150,0.39,auxiliary
+TB12_Grid Production Frequency Avg. (48),TB12_frequency,TB12,frequency,Hz,float64,2521,0.86,auxiliary
