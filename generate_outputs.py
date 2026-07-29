@@ -50,9 +50,16 @@ def load_models():
     return load_models(str(BASE / "models"))
 
 
+def _daily_agg(df, date_col, value_cols):
+    df = df.copy()
+    df["_date"] = pd.to_datetime(df[date_col]).dt.normalize()
+    agg = {c: "mean" for c in value_cols}
+    return df.groupby("_date").agg(agg).reset_index()
+
+
 def generate_power_forecast(test_df, models):
-    """Generate power_forecast.csv per doc section 15 Table 9 Row 1"""
-    logger.info("Generating power_forecast.csv ...")
+    """Generate power_forecast.csv — daily aggregated per doc section 15 Table 9 Row 1"""
+    logger.info("Generating power_forecast.csv (daily avg) ...")
 
     ts_col = "timestamp"
     if ts_col not in test_df.columns:
@@ -69,34 +76,39 @@ def generate_power_forecast(test_df, models):
 
                 from src.predict import predict_with_model
                 preds = predict_with_model(models[model_key], test_df)
-                actuals = test_df[target].values if target in test_df.columns else np.full(len(preds), np.nan)
 
                 sigma = np.where(preds > 0, preds * 0.08, 50)
                 lowers = np.maximum(0, preds - 1.96 * sigma)
                 uppers = np.minimum(RATED_POWER, preds + 1.96 * sigma)
 
-                for i in range(len(preds)):
-                    ts_target = test_df[ts_col].iloc[i] if ts_col in test_df.columns else ""
-                    horizon_min = HORIZON_MAP[horizon]
+                daily = pd.DataFrame({
+                    ts_col: test_df[ts_col].values[:len(preds)],
+                    "y_pred": preds,
+                    "y_low": lowers,
+                    "y_high": uppers,
+                })
+                daily = _daily_agg(daily, ts_col, ["y_pred", "y_low", "y_high"])
+
+                horizon_min = HORIZON_MAP[horizon]
+                for _, r in daily.iterrows():
                     rows.append({
-                        "timestamp_issue": TIMESTAMP_NOW,
-                        "timestamp_target": str(ts_target),
+                        "forecast_date": str(r["_date"].date()),
                         "turbine_id": tb,
                         "horizon_min": horizon_min,
-                        "y_pred": round(float(preds[i]), 2),
-                        "y_low": round(float(lowers[i]), 2),
-                        "y_high": round(float(uppers[i]), 2),
+                        "y_pred": round(r["y_pred"], 2),
+                        "y_low": round(max(0, r["y_low"]), 2),
+                        "y_high": round(min(RATED_POWER, r["y_high"]), 2),
                         "model_version": f"{MODEL_VERSION}_{mdl_name}",
                     })
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows).sort_values(["forecast_date", "turbine_id", "horizon_min", "model_version"]).reset_index(drop=True)
     df.to_csv(OUT / "power_forecast.csv", index=False)
-    logger.info(f"  power_forecast.csv: {df.shape[0]} rows")
+    logger.info(f"  power_forecast.csv: {df.shape[0]} rows (daily)")
 
 
 def generate_farm_forecast(test_df, models):
-    """Generate farm_forecast.csv per doc section 15 Table 9 Row 2"""
-    logger.info("Generating farm_forecast.csv ...")
+    """Generate farm_forecast.csv — daily aggregated per doc section 15 Table 9 Row 2"""
+    logger.info("Generating farm_forecast.csv (daily avg) ...")
 
     ts_col = "timestamp"
     if ts_col not in test_df.columns:
@@ -114,21 +126,25 @@ def generate_farm_forecast(test_df, models):
             preds = predict_with_model(models[model_key], test_df)
             dt_minutes = HORIZON_MAP[horizon]
 
-            for i in range(len(preds)):
-                ts_target = test_df[ts_col].iloc[i] if ts_col in test_df.columns else ""
-                farm_power = round(float(preds[i]), 2)
+            daily = pd.DataFrame({
+                ts_col: test_df[ts_col].values[:len(preds)],
+                "farm_power_pred": preds,
+            })
+            daily = _daily_agg(daily, ts_col, ["farm_power_pred"])
+
+            for _, r in daily.iterrows():
+                farm_power = round(r["farm_power_pred"], 2)
                 farm_energy = round(farm_power * dt_minutes / 60.0, 2)
                 rows.append({
-                    "timestamp_issue": TIMESTAMP_NOW,
-                    "timestamp_target": str(ts_target),
+                    "forecast_date": str(r["_date"].date()),
                     "horizon_min": dt_minutes,
                     "farm_power_pred": farm_power,
                     "farm_energy_pred": farm_energy,
                 })
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows).sort_values(["forecast_date", "horizon_min"]).reset_index(drop=True)
     df.to_csv(OUT / "farm_forecast.csv", index=False)
-    logger.info(f"  farm_forecast.csv: {df.shape[0]} rows")
+    logger.info(f"  farm_forecast.csv: {df.shape[0]} rows (daily)")
 
 
 def generate_metrics():
