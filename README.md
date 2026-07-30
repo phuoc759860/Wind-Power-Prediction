@@ -201,7 +201,9 @@ python -m pytest tests/ -v
 
 ## Data
 
-11 semi-annual SCADA Excel files in `data/raw/`, covering January 2021 to July 2026 (~312K rows after processing). Each file contains 49 columns across 12 turbines: wind speed, temperature, power output, and frequency at 10-minute intervals.
+11 semi-annual SCADA Excel files in `data/raw/`, covering January 2021 to July 2026. Each file contains 49 columns across 12 turbines: wind speed, temperature, power output, and frequency at 10-minute intervals.
+
+Actual row counts per split are computed by the pipeline and saved to `data/metadata/split_statistics.json`. Run `python main.py` to regenerate them from the current data files rather than relying on hardcoded estimates.
 
 ## Key Formulas (from Vietnamese Doc)
 

@@ -961,26 +961,43 @@ def plot_horizon_comparison(results_df: pd.DataFrame, save_path: str = None):
 def evaluate_alert_accuracy(test_data: pd.DataFrame, predictions: Dict,
                              ramp_threshold: float = 0.5) -> Dict:
     results = {}
-    if "farm_total_power" not in test_data.columns:
-        return results
-    farm_actual = test_data["farm_total_power"].values
+    TURBINE_IDS = [f"TB{i:02d}" for i in range(1, 13)]
 
-    ramp_actual = np.abs(np.diff(farm_actual, prepend=farm_actual[0])) / 2200 * 100
-    ramp_events = ramp_actual > ramp_threshold
-
+    # Evaluate per turbine × horizon — use actual power for ground truth
     for model_key, pred_info in predictions.items():
         model_name = pred_info.get("model_name", "unknown")
         target = pred_info.get("target", model_key)
-        if "farm_total_power" not in target or "30min" not in target:
-            continue
         pred_vals = pred_info.get("predictions")
         if pred_vals is None or len(pred_vals) < 10:
             continue
 
-        n = min(len(pred_vals), len(ramp_events))
-        pred_ramp = np.abs(np.diff(pred_vals[:n], prepend=pred_vals[0])) / 2200 * 100
-        pred_events = pred_ramp > ramp_threshold
-        actual_events = ramp_events[:n]
+        # Identify turbine and horizon from target
+        turbine_id = None
+        horizon = None
+        for tb in TURBINE_IDS:
+            if target.startswith(tb) and "_power_target_" in target:
+                turbine_id = tb
+                horizon = target.split("_target_")[1]
+                break
+        if turbine_id is None:
+            continue
+
+        # Ground truth: use actual power values (or if available, the target column)
+        actual_col = f"{turbine_id}_power"
+        if actual_col not in test_data.columns:
+            continue
+        actual_vals = test_data[actual_col].values[:len(pred_vals)]
+
+        # Ramp events on actual
+        rated = test_data.get(f"{turbine_id}_rated_power", pd.Series([2200])).iloc[0]
+        ramp_actual_pct = np.abs(np.diff(actual_vals, prepend=actual_vals[0])) / rated * 100
+        actual_events = ramp_actual_pct > ramp_threshold
+
+        # Ramp events on predicted
+        n = min(len(pred_vals), len(actual_events))
+        pred_ramp_pct = np.abs(np.diff(pred_vals[:n], prepend=pred_vals[0])) / rated * 100
+        pred_events = pred_ramp_pct > ramp_threshold
+        actual_events = actual_events[:n]
 
         tp = np.sum(pred_events & actual_events)
         fp = np.sum(pred_events & ~actual_events)
@@ -994,10 +1011,14 @@ def evaluate_alert_accuracy(test_data: pd.DataFrame, predictions: Dict,
         fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
         balanced_acc = (recall + specificity) / 2
 
-        results[model_name] = {
-            "definition": ("Ramp event = |farm_power_change| > {:.0f}% of rated per 10min. "
-                           "Ground truth computed from actual farm_total_power. "
-                           "TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event").format(ramp_threshold * 100),
+        key = f"{model_name}_{turbine_id}_{horizon}"
+        results[key] = {
+            "turbine_id": turbine_id,
+            "horizon": horizon,
+            "model": model_name,
+            "definition": ("Ramp event = |power_change| > {:.0f}% of rated per 10min. "
+                           "Ground truth from actual {} power. "
+                           "TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event").format(ramp_threshold * 100, turbine_id),
             "threshold_pct": ramp_threshold * 100,
             "n_actual_events": int(actual_events.sum()),
             "n_predicted_events": int(pred_events.sum()),
@@ -1006,6 +1027,97 @@ def evaluate_alert_accuracy(test_data: pd.DataFrame, predictions: Dict,
             "f1": round(f1, 4), "false_alarm_rate": round(far, 4),
             "specificity": round(specificity, 4), "fpr": round(fpr, 4),
             "balanced_accuracy": round(balanced_acc, 4),
+        }
+
+    return results
+
+
+def evaluate_anomaly_detection(test_data: pd.DataFrame) -> Dict:
+    results = {}
+    TURBINE_IDS = [f"TB{i:02d}" for i in range(1, 13)]
+    RATED_POWER = 2200
+
+    for tb in TURBINE_IDS:
+        pwr_col = f"{tb}_power"
+        ws_col = f"{tb}_wind_speed"
+        if pwr_col not in test_data.columns or ws_col not in test_data.columns:
+            continue
+
+        power = test_data[pwr_col].values
+        ws = test_data[ws_col].values
+        n = len(power)
+
+        # Ground-truth anomalies (domain-rule based)
+        gt_anomaly = np.zeros(n, dtype=bool)
+        gt_power = np.zeros(n, dtype=bool)
+        gt_ws = np.zeros(n, dtype=bool)
+        for i in range(n):
+            if np.isnan(power[i]) or np.isnan(ws[i]):
+                continue
+            if power[i] < 0:
+                gt_anomaly[i] = True
+                gt_power[i] = True
+            elif power[i] > RATED_POWER:
+                gt_anomaly[i] = True
+                gt_power[i] = True
+            elif ws[i] < 3 and power[i] > RATED_POWER * 0.8:
+                gt_anomaly[i] = True
+                gt_ws[i] = True
+            elif ws[i] > 15 and power[i] < RATED_POWER * 0.1:
+                gt_anomaly[i] = True
+                gt_ws[i] = True
+
+        # Detected anomalies (z-score method, same logic as generate_anomaly_alert)
+        valid = ~(np.isnan(power) | np.isnan(ws))
+        if valid.sum() < 100:
+            continue
+        p_valid = power[valid]
+        mean_p, std_p = np.mean(p_valid), np.std(p_valid)
+        detected = np.zeros(n, dtype=bool)
+        for i in range(n):
+            if np.isnan(power[i]) or np.isnan(ws[i]):
+                continue
+            z_score = abs(power[i] - mean_p) / (std_p + 1e-6)
+            if z_score > 3.0:
+                detected[i] = True
+
+        tp = int(np.sum(detected & gt_anomaly))
+        fp = int(np.sum(detected & ~gt_anomaly))
+        fn = int(np.sum(~detected & gt_anomaly))
+        tn = int(np.sum(~detected & ~gt_anomaly))
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        far = fp / (fp + tp) if (fp + tp) > 0 else 0
+
+        # Per-type breakdown
+        def _type_stats(mask_type):
+            t = int(np.sum(detected & mask_type))
+            f = int(np.sum(detected & gt_anomaly & ~mask_type))
+            if (t + f) == 0:
+                return 0, 0
+            return t, t / (t + f) if (t + f) > 0 else 0
+
+        tp_power, prec_power = _type_stats(gt_power)
+        tp_ws_curve, prec_ws_curve = _type_stats(gt_ws)
+
+        results[tb] = {
+            "method": "z-score > 3 on power (global mean/std)",
+            "gt_definition": ("Anomaly = power < 0 OR power > rated OR "
+                              "(wind < 3m/s & power > 1760kW) OR (wind > 15m/s & power < 220kW)"),
+            "n_gt_anomalies": int(gt_anomaly.sum()),
+            "n_detected": int(detected.sum()),
+            "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "false_alarm_rate": round(far, 4),
+            "gt_power_anomalies": int(gt_power.sum()),
+            "detected_power_anomalies": tp_power,
+            "power_anomaly_precision": round(prec_power, 4) if prec_power > 0 else 0,
+            "gt_wind_curve_anomalies": int(gt_ws.sum()),
+            "detected_wind_curve_anomalies": tp_ws_curve,
+            "wind_curve_anomaly_precision": round(prec_ws_curve, 4) if prec_ws_curve > 0 else 0,
         }
 
     return results

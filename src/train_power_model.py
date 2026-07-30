@@ -317,10 +317,13 @@ def walk_forward_ml(df: pd.DataFrame, target_col: str, config: dict,
 
         for model_name in ml_models:
             if model_name == "xgboost" and HAS_XGB:
-                model = _tune_xgboost(X_train_s, y_train_vals, X_val_s, y_val_vals, feature_cols, config)
+                model = train_xgboost(X_train_s, y_train_vals, config)
             elif model_name == "lightgbm" and HAS_LGBM:
-                model = _tune_lightgbm(X_train_s, y_train_vals, X_val_s, y_val_vals, feature_cols, config)
+                model = train_lightgbm(X_train_s, y_train_vals, config)
             else:
+                continue
+
+            if model is None:
                 continue
 
             val_pred = model.predict(X_val_s)
@@ -341,9 +344,75 @@ def walk_forward_ml(df: pd.DataFrame, target_col: str, config: dict,
     return fold_results
 
 
-def save_models(trained_models: Dict, output_dir: str):
+def walk_forward_all_ml(df: pd.DataFrame, config: dict, n_folds: int = 3,
+                        save_path: str = None) -> pd.DataFrame:
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        tqdm = lambda x, **kw: x
+
+    turbine_ids = config.get("turbines", {}).get("ids", [])
+    base_target_cols = [f"{tid}_power" for tid in turbine_ids if f"{tid}_power" in df.columns]
+    base_target_cols.append("farm_total_power")
+    base_target_cols = [c for c in base_target_cols if c in df.columns]
+    horizons = config.get("forecasting", {}).get("horizons", [])
+
+    logger.info(f"Walk-forward ML: {len(base_target_cols)} targets x {len(horizons)} horizons x {n_folds} folds")
+    all_results = []
+    total_combos = len(base_target_cols) * len(horizons)
+
+    for base_target in tqdm(base_target_cols, desc="WF-ML targets"):
+        for horizon in horizons:
+            h_name = horizon["name"]
+            target = f"{base_target}_target_{h_name}"
+            if target not in df.columns:
+                continue
+            try:
+                fold_results = walk_forward_ml(df, target, config, n_folds=n_folds)
+                all_results.extend(fold_results)
+                logger.info(f"  {target}: {len(fold_results)} folds")
+            except Exception as e:
+                logger.warning(f"  WF failed for {target}: {e}")
+
+    wf_df = pd.DataFrame(all_results)
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        wf_df.to_csv(save_path, index=False)
+        logger.info(f"  WF results saved to {save_path}")
+
+    return wf_df
+
+
+def save_models(trained_models: Dict, output_dir: str, config: Optional[dict] = None,
+                seed: Optional[int] = None, data_path: Optional[str] = None):
     import joblib
+    import hashlib
+    import subprocess
     os.makedirs(output_dir, exist_ok=True)
+
+    # Capture provenance once
+    git_commit = None
+    try:
+        git_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+    except Exception:
+        git_commit = "unknown"
+
+    config_hash = None
+    if config:
+        config_hash = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()[:16]
+
+    data_hash = None
+    if data_path and os.path.exists(data_path):
+        hasher = hashlib.sha256()
+        with open(data_path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                hasher.update(chunk)
+        data_hash = hasher.hexdigest()[:16]
+
+    python_version = f"{__import__('sys').version_info.major}.{__import__('sys').version_info.minor}.{__import__('sys').version_info.micro}"
 
     for model_key, model_info in trained_models.items():
         safe_name = model_key.replace("/", "_").replace(" ", "_")
@@ -353,7 +422,35 @@ def save_models(trained_models: Dict, output_dir: str):
         with open(os.path.join(output_dir, f"{safe_name}_features.json"), "w") as f:
             json.dump(model_info["feature_cols"], f)
 
+        metadata = {
+            "model_key": model_key,
+            "model_type": model_info.get("model_name", type(model_info["model"]).__name__),
+            "n_features": len(model_info["feature_cols"]),
+            "seed": seed,
+            "python_version": python_version,
+            "git_commit": git_commit,
+            "config_hash": config_hash,
+            "source_data_hash": data_hash,
+            "dependencies": {k: v for k, v in {
+                "pandas": "pd",
+                "numpy": "np",
+                "scikit-learn": "sklearn",
+                "xgboost": "xgboost",
+                "lightgbm": "lightgbm",
+            }.items() if _mod_version(v)},
+        }
+        with open(os.path.join(output_dir, f"{safe_name}_metadata.json"), "w") as f:
+            json.dump(metadata, f, indent=2)
+
     logger.info(f"Saved {len(trained_models)} models to {output_dir}")
+
+
+def _mod_version(mod_name):
+    try:
+        mod = __import__(mod_name)
+        return mod.__version__
+    except Exception:
+        return None
 
 
 def load_models(model_dir: str) -> Dict:

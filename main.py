@@ -24,7 +24,8 @@ from src.evaluate import (evaluate_all_models, generate_evaluation_report,
                           plot_best_model_scatter, plot_error_histogram,
                           plot_farm_timeseries, plot_radar_summary,
                           compute_farm_level_metrics, analyze_tb12,
-                          evaluate_alert_accuracy, plot_tb12_distribution)
+                          evaluate_alert_accuracy, evaluate_anomaly_detection,
+                          plot_tb12_distribution)
 from src.predict import predict_power, create_forecast_output, add_confidence_intervals, save_forecasts
 
 logging.basicConfig(
@@ -179,6 +180,9 @@ def main():
         if "expected_steps" in s:
             logger.info(f"  {'':12s}  expected={s['expected_steps']}, actual={s['actual_steps']}, "
                         f"diff={s['step_diff']:+d}, dups={s['n_duplicate_timestamps']}, missing={s['n_missing_timestamps']}")
+    with open(base_dir / "data" / "metadata" / "split_statistics.json", "w") as f:
+        json.dump(split_stats, f, indent=2, default=str)
+    logger.info("  Split statistics saved to data/metadata/split_statistics.json")
 
     power_cols = [c for c in train_df.columns if c.endswith("_power")
                   and "target" not in c and "lag" not in c and "roll" not in c
@@ -196,27 +200,31 @@ def main():
     with open(base_dir / "data" / "metadata" / "walk_forward_summary.json", "w") as f:
         json.dump(wf_summary, f, indent=2, default=str)
 
-    # Walk-forward validation for ML models (sample: 2 turbines x 2 horizons for speed)
+    # Walk-forward validation for ML models (full coverage: all turbines x horizons)
     logger.info("\n" + "-" * 50)
-    logger.info("WALK-FORWARD VALIDATION (ML MODELS - SAMPLE)")
+    logger.info("WALK-FORWARD VALIDATION (ML MODELS - FULL)")
     logger.info("-" * 50)
-    from src.train_power_model import walk_forward_ml as wf_ml
-    ml_wf_results = []
-    sample_targets = ["TB01_power_target_10min", "TB01_power_target_1hour",
-                      "farm_total_power_target_10min", "farm_total_power_target_1hour"]
-    for tgt in sample_targets:
-        if tgt in feature_data.columns:
-            folds = wf_ml(feature_data, tgt, config, n_folds=3)
-            ml_wf_results.extend(folds)
+    from src.train_power_model import walk_forward_all_ml
+    wf_ml_df = walk_forward_all_ml(feature_data, config, n_folds=3,
+                                   save_path=str(base_dir / "data" / "metadata" / "walk_forward_ml.csv"))
 
-    if ml_wf_results:
-        wf_df = pd.DataFrame(ml_wf_results)
-        for (mdl, hrz), grp in wf_df.groupby(["model", "target"]):
-            h_name = hrz.replace("_power_target_", "_").split("_")[-1] if "_power_target_" in hrz else hrz
-            logger.info(f"  {mdl:12s} {h_name:6s}: n_folds={len(grp)}, "
-                        f"RMSE={grp['rmse'].mean():.1f} +/- {grp['rmse'].std():.1f}")
-        wf_df.to_csv(base_dir / "data" / "metadata" / "walk_forward_ml.csv", index=False)
-        logger.info(f"  ML walk-forward results saved ({len(ml_wf_results)} rows)")
+    if not wf_ml_df.empty:
+        wf_summary_ml = []
+        for (mdl, tgt), grp in wf_ml_df.groupby(["model", "target"]):
+            wf_summary_ml.append({
+                "model": mdl, "target": tgt,
+                "rmse_mean": round(grp["rmse"].mean(), 2),
+                "rmse_std": round(grp["rmse"].std(), 2),
+                "r2_mean": round(grp["r2"].mean(), 4),
+                "r2_std": round(grp["r2"].std(), 4),
+                "n_folds": len(grp),
+            })
+        wf_summary_ml_df = pd.DataFrame(wf_summary_ml)
+        wf_summary_ml_df.to_csv(base_dir / "data" / "metadata" / "walk_forward_ml_summary.csv", index=False)
+
+        for _, r in wf_summary_ml_df.iterrows():
+            logger.info(f"  {r['model']:12s} {str(r['target']):40s}: RMSE={r['rmse_mean']:.1f} +/- {r['rmse_std']:.1f}  R2={r['r2_mean']:.4f} +/- {r['r2_std']:.4f}  (n={r['n_folds']})")
+        logger.info(f"  ML walk-forward: {len(wf_ml_df)} rows across {wf_ml_df['fold'].nunique()} folds")
 
     # ============================================================
     # STEP 7: Train Baselines
@@ -261,7 +269,10 @@ def main():
                 logger.error(f"Error training models for {target}: {e}")
 
     if all_trained_models:
-        save_models(all_trained_models, str(base_dir / "models"))
+        seed = config.get("training", {}).get("random_state", 42)
+        raw_dir = str(base_dir / "data" / "raw")
+        save_models(all_trained_models, str(base_dir / "models"),
+                    config=config, seed=seed, data_path=raw_dir)
 
     # ============================================================
     # STEP 9: Anomaly Detection
@@ -323,16 +334,31 @@ def main():
     with open(base_dir / "data" / "metadata" / "tb12_analysis.json", "w") as f:
         json.dump(tb12_analysis, f, indent=2, default=str)
 
-    # Alert accuracy evaluation
+    # Alert accuracy evaluation (per turbine × horizon)
     logger.info("\n" + "-" * 50)
     logger.info("ALERT ACCURACY (RAMP DETECTION)")
     logger.info("-" * 50)
     alert_acc = evaluate_alert_accuracy(test_df, predictions)
-    for model_name, metrics in alert_acc.items():
-        logger.info(f"  {model_name}: Precision={metrics['precision']:.3f} Recall={metrics['recall']:.3f} F1={metrics['f1']:.3f} FAR={metrics['false_alarm_rate']:.3f}")
+    for key, metrics in alert_acc.items():
+        logger.info(f"  {metrics['turbine_id']:4s} {metrics['horizon']:6s} {metrics['model']:10s} "
+                     f"Prec={metrics['precision']:.3f} Rec={metrics['recall']:.3f} "
+                     f"F1={metrics['f1']:.3f} FAR={metrics['false_alarm_rate']:.3f}")
     if alert_acc:
         with open(base_dir / "data" / "metadata" / "alert_accuracy.json", "w") as f:
             json.dump(alert_acc, f, indent=2, default=str)
+
+    # Anomaly detection accuracy evaluation
+    logger.info("\n" + "-" * 50)
+    logger.info("ANOMALY DETECTION ACCURACY")
+    logger.info("-" * 50)
+    anomaly_acc = evaluate_anomaly_detection(test_df)
+    for tb, metrics in anomaly_acc.items():
+        logger.info(f"  {tb}: Prec={metrics['precision']:.3f} Rec={metrics['recall']:.3f} "
+                     f"F1={metrics['f1']:.3f} FAR={metrics['false_alarm_rate']:.3f} "
+                     f"GT={metrics['n_gt_anomalies']} Detected={metrics['n_detected']}")
+    if anomaly_acc:
+        with open(base_dir / "data" / "metadata" / "anomaly_accuracy.json", "w") as f:
+            json.dump(anomaly_acc, f, indent=2, default=str)
 
     # ============================================================
     # STEP 12: Create Forecast Output

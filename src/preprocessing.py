@@ -13,21 +13,21 @@ def handle_missing_values(df: pd.DataFrame, max_gap: int = 12) -> pd.DataFrame:
                     and "farm_" not in c]
 
     for col in feature_cols:
-        if df[col].isnull().sum() == 0:
+        null_count = df[col].isnull().sum()
+        if null_count == 0:
             continue
 
-        null_mask = df[col].isnull()
-        groups = (~null_mask).cumsum()
-        gap_sizes = null_mask.groupby(groups).transform("sum")
+        df[col] = df[col].ffill(limit=max_gap)
 
-        short_gap = null_mask & (gap_sizes <= max_gap)
-        if short_gap.sum() > 0:
-            df.loc[short_gap, col] = df.loc[short_gap, col].ffill(limit=max_gap)
-
-        long_gap = null_mask & (gap_sizes > max_gap)
-        if long_gap.sum() > 0:
+        remaining = df[col].isnull().sum()
+        filled = null_count - remaining
+        if filled > 0:
+            logger.info(
+                f"Column {col}: forward-filled {filled}/{null_count} NaN values (limit={max_gap})"
+            )
+        if remaining > 0:
             logger.warning(
-                f"Column {col}: {long_gap.sum()} values in long gaps (>{max_gap} steps) left as NaN"
+                f"Column {col}: {remaining} NaN values left unfilled (gap > {max_gap})"
             )
 
     return df

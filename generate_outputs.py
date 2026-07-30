@@ -90,6 +90,7 @@ def generate_power_forecast(test_df, models):
                 daily = _daily_agg(daily, ts_col, ["y_pred", "y_low", "y_high"])
 
                 horizon_min = HORIZON_MAP[horizon]
+                forecast_quality = "reference_only" if horizon_min >= 360 else "production"
                 for _, r in daily.iterrows():
                     rows.append({
                         "timestamp_issue": str(r["_date"].date()),
@@ -100,6 +101,7 @@ def generate_power_forecast(test_df, models):
                         "y_low": round(max(0, r["y_low"]), 2),
                         "y_high": round(min(RATED_POWER, r["y_high"]), 2),
                         "model_version": f"{MODEL_VERSION}_{mdl_name}",
+                        "forecast_quality": forecast_quality,
                     })
 
     df = pd.DataFrame(rows).sort_values(["timestamp_issue", "turbine_id", "horizon_min", "model_version"]).reset_index(drop=True)
@@ -136,12 +138,14 @@ def generate_farm_forecast(test_df, models):
             for _, r in daily.iterrows():
                 farm_power = round(r["farm_power_pred"], 2)
                 farm_energy = round(farm_power * dt_minutes / 60.0, 2)
+                forecast_quality = "reference_only" if dt_minutes >= 360 else "production"
                 rows.append({
                     "timestamp_issue": str(r["_date"].date()),
                     "timestamp_target": str(r["_date"].date()),
                     "horizon_min": dt_minutes,
                     "farm_power_pred": farm_power,
                     "farm_energy_pred": farm_energy,
+                    "forecast_quality": forecast_quality,
                 })
 
     df = pd.DataFrame(rows).sort_values(["timestamp_issue", "horizon_min"]).reset_index(drop=True)
@@ -537,12 +541,14 @@ def generate_failure_risk(test_df):
             if power[i] < 10 and mean_p > 500:
                 stop_count += 1
                 if stop_count > 3:
+                    risk_score = round(min(0.85, 0.3 + stop_count * 0.05), 4)
                     rows.append({
                         "timestamp": str(timestamps[i]),
                         "turbine_id": tb,
                         "component": "general",
                         "horizon": "24hour",
-                        "failure_probability": round(min(0.85, 0.3 + stop_count * 0.05), 4),
+                        "stop_risk_score": risk_score,
+                        "method": "heuristic (stop-count based, not validated against failure labels)",
                         "recommended_action": "Inspect turbine - repeated stops detected",
                     })
             else:
