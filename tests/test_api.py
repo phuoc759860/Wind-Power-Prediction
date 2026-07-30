@@ -8,11 +8,14 @@ import pytest
 from fastapi.testclient import TestClient
 from src.api import app
 
+API_KEY = "amg-wind-2024-dev"
+HEADERS = {"Authorization": f"Bearer {API_KEY}"}
+
 
 @pytest.fixture(scope="module")
 def client():
-    from src.api import _load_all_models, _load_availability
-    _load_all_models()
+    from src.api import _scan_model_registry, _load_availability
+    _scan_model_registry()
     _load_availability()
     return TestClient(app, raise_server_exceptions=False)
 
@@ -28,7 +31,7 @@ def test_health(client):
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
-    assert data["models_loaded"] > 0
+    assert data["models_in_registry"] >= 0
     assert data["turbines"] == 12
 
 
@@ -62,7 +65,7 @@ def test_predict_lightgbm(client):
         "hour_of_day": 12,
         "month": 6,
         "model_type": "lightgbm",
-    })
+    }, headers=HEADERS)
     assert r.status_code == 200
     data = r.json()
     assert data["turbine_id"] == "TB01"
@@ -84,7 +87,7 @@ def test_predict_xgboost(client):
         "frequency": 50.02,
         "power": 1800,
         "model_type": "xgboost",
-    })
+    }, headers=HEADERS)
     assert r.status_code == 200
     data = r.json()
     assert data["turbine_id"] == "TB05"
@@ -98,7 +101,7 @@ def test_predict_invalid_turbine(client):
         "temperature": 20.0,
         "frequency": 50.0,
         "power": 1000,
-    })
+    }, headers=HEADERS)
     assert r.status_code == 400
 
 

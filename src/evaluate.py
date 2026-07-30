@@ -1196,10 +1196,9 @@ def evaluate_coverage_calibration(test_data: pd.DataFrame, predictions: Dict,
 
         for conf in confidence_levels:
             alpha = 1 - conf
-            q_lo = np.quantile(errors, alpha / 2)
-            q_hi = np.quantile(errors, 1 - alpha / 2)
-            lower = pred_values + q_lo
-            upper = pred_values + q_hi
+            q = np.nanquantile(errors, conf)
+            lower = pred_values - q
+            upper = pred_values + q
             inside = (actual >= lower) & (actual <= upper)
             emp_coverage = np.mean(inside)
             interval_width = np.mean(upper - lower)

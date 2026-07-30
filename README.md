@@ -175,7 +175,7 @@ Generated in `outputs/forecasts/`:
 | `metrics.csv` | model, turbine_id, horizon, MAE, nMAE, RMSE, nRMSE, Bias, R2, max_error, skill_score | 130 | Model performance metrics |
 | `evaluation_metrics.csv` | target, model, horizon, mae, nmae_pct, rmse, nrmse_pct, bias, r2, max_error, skill_score, n_samples | 130 | Detailed evaluation metrics |
 | `farm_metrics.csv` | target, model, horizon, mae, rmse, nmae_pct, nrmse_pct, bias, r2, max_error, n_samples, level | 10 | Farm-level metrics (direct on summed power) |
-| `data_quality_report.csv` | column, missing_rate, invalid_count, min, max, unit_status, remarks | 115 | Column-level data quality |
+| `data_quality_report.csv` | column, missing_rate_pct, invalid_values, min, max, unit, remarks, definition, data_source | 48+ | Column-level data quality with formula and source documented |
 | `ramp_alert.csv` | timestamp, ramp_type, expected_change, probability, threshold, affected_turbines | 376 | Ramp events detected |
 | `failure_risk.csv` | timestamp, turbine_id, component, horizon, stop_risk_score, method, recommended_action | 42K | Turbine stop risk score |
 | `anomaly_alert.csv` | timestamp, turbine_id, anomaly_score, suspected_component, evidence | 0+ | Statistical anomalies (z>3.0) |

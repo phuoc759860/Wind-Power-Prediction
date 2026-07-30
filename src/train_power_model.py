@@ -181,7 +181,7 @@ def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
     return results, trained_models
 
 
-def _tune_xgboost(X_train, y_train, X_val, y_val, feature_cols, config):
+def _tune_xgboost(X_train, y_train, config, X_val=None, y_val=None, feature_cols=None):
     from sklearn.model_selection import TimeSeriesSplit
     import xgboost as xgb
 
@@ -218,12 +218,16 @@ def _tune_xgboost(X_train, y_train, X_val, y_val, feature_cols, config):
                     best_score = mean_rmse
                     best_params = params
 
+    final_X = np.vstack([X_train, X_val]) if X_val is not None else X_train
+    final_y = np.concatenate([y_train, y_val]) if y_val is not None else y_train
+    if best_params is None:
+        best_params = {**base_params, "n_estimators": 100, "max_depth": 6, "learning_rate": 0.1}
     model = xgb.XGBRegressor(**best_params)
-    model.fit(np.vstack([X_train, X_val]), np.concatenate([y_train, y_val]))
+    model.fit(final_X, final_y)
     return model
 
 
-def _tune_lightgbm(X_train, y_train, X_val, y_val, feature_cols, config):
+def _tune_lightgbm(X_train, y_train, config, X_val=None, y_val=None, feature_cols=None):
     from sklearn.model_selection import TimeSeriesSplit
     import lightgbm as lgb
 
@@ -261,8 +265,12 @@ def _tune_lightgbm(X_train, y_train, X_val, y_val, feature_cols, config):
                     best_score = mean_rmse
                     best_params = params
 
+    final_X = np.vstack([X_train, X_val]) if X_val is not None else X_train
+    final_y = np.concatenate([y_train, y_val]) if y_val is not None else y_train
+    if best_params is None:
+        best_params = {**base_params, "n_estimators": 100, "max_depth": 6, "learning_rate": 0.1}
     model = lgb.LGBMRegressor(**best_params)
-    model.fit(np.vstack([X_train, X_val]), np.concatenate([y_train, y_val]))
+    model.fit(final_X, final_y)
     return model
 
 
@@ -272,6 +280,24 @@ MODEL_TRAINERS = {
     "lightgbm": _tune_lightgbm,
     "linear_regression": train_linear_reg,
 }
+
+
+def train_xgboost(X_train, y_train, config, X_val=None, y_val=None, feature_cols=None):
+    if not HAS_XGB:
+        return None
+    params = (config or {}).get("models", {}).get("xgboost", {})
+    model = xgb.XGBRegressor(**params)
+    model.fit(X_train, y_train, verbose=False)
+    return model
+
+
+def train_lightgbm(X_train, y_train, config, X_val=None, y_val=None, feature_cols=None):
+    if not HAS_LGBM:
+        return None
+    params = (config or {}).get("models", {}).get("lightgbm", {})
+    model = lgb.LGBMRegressor(**params)
+    model.fit(X_train, y_train)
+    return model
 
 
 def walk_forward_ml(df: pd.DataFrame, target_col: str, config: dict,
@@ -415,8 +441,8 @@ def save_models(trained_models: Dict, output_dir: str, config: Optional[dict] = 
             "config_hash": config_hash,
             "source_data_hash": data_hash,
             "dependencies": {k: v for k, v in {
-                "pandas": "pd",
-                "numpy": "np",
+                "pandas": "pandas",
+                "numpy": "numpy",
                 "scikit-learn": "sklearn",
                 "xgboost": "xgboost",
                 "lightgbm": "lightgbm",

@@ -1,0 +1,9 @@
+{
+  "timezone": "None (naive)",
+  "start": "2021-01-01 00:00:00",
+  "end": "2026-12-07 23:50:00",
+  "total_raw_rows": 292447,
+  "expected_timestamps_10min": 312048,
+  "duplicate_timestamps": 0,
+  "missing_timestamps_estimate": 19601
+}

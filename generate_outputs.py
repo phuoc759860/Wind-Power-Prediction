@@ -59,12 +59,10 @@ def _daily_agg(df, date_col, value_cols):
 
 def _conformal_bounds_for_group(predicted, actual, confidence=0.9, rated=2200):
     residuals = np.abs(actual - predicted)
-    alpha = 1 - confidence
     if len(residuals) >= 10:
-        q_lo = np.quantile(residuals, alpha / 2)
-        q_hi = np.quantile(residuals, 1 - alpha / 2)
-        lower = np.maximum(0, predicted + q_lo)
-        upper = np.minimum(rated, predicted + q_hi)
+        q = np.nanquantile(residuals, confidence)
+        lower = np.maximum(0, predicted - q)
+        upper = np.minimum(rated, predicted + q)
     else:
         std = np.std(predicted) if len(predicted) > 1 else predicted.std() if hasattr(predicted, 'std') else 0
         if pd.isna(std) or std == 0:
@@ -260,6 +258,9 @@ def generate_data_quality_report():
     unit_map = {"_power": "kW", "_wind_speed": "m/s", "_temperature": "degC", "_frequency": "Hz"}
 
     records = []
+    formula = "missing_rate = (NaN count after ffill imputation) / total rows * 100"
+    data_source = "data/processed/processed_data.parquet (post-ffill, pre-feature-engineering)"
+
     for col in physical_cols:
         s = processed[col]
         total = len(s)
@@ -306,11 +307,28 @@ def generate_data_quality_report():
             "max": max_val,
             "unit": unit,
             "remarks": remarks,
+            "definition": formula,
+            "data_source": data_source,
+        })
+
+    missing_flag_cols = [c for c in processed.columns if c.endswith("_missing")]
+    if missing_flag_cols:
+        flag_def = "binary indicator (1=missing) from create_missing_flags() run before ffill — reflects raw gaps before imputation"
+        records.append({
+            "column": f"{len(missing_flag_cols)} _missing flag columns (e.g. TB01_power_missing)",
+            "missing_rate_pct": "N/A (flags are 0/1, not imputed)",
+            "invalid_values": 0,
+            "min": 0,
+            "max": 1,
+            "unit": "binary",
+            "remarks": "Captured pre-ffill; see preprocessing.py::create_missing_flags()",
+            "definition": flag_def,
+            "data_source": data_source,
         })
 
     out = pd.DataFrame(records)
     out.to_csv(OUT / "data_quality_report.csv", index=False)
-    logger.info(f"  data_quality_report.csv: {out.shape[0]} physical columns")
+    logger.info(f"  data_quality_report.csv: {out.shape[0]} rows ({len(physical_cols)} physical + {1 if missing_flag_cols else 0} flag summary)")
 
 
 def generate_ramp_alert(test_df):
