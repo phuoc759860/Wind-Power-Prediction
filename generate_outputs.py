@@ -514,6 +514,24 @@ def generate_figures():
     if eval_path.exists():
         results_df = pd.read_csv(eval_path)
         test_df = get_test_data()
+        models = load_models()
+        config = load_config()
+        predictions = {}
+        for tb in TURBINES:
+            for horizon in HORIZON_NAMES:
+                for mdl_name in ["lightgbm", "xgboost"]:
+                    target = f"{tb}_power_target_{horizon}"
+                    model_key = f"{target}_{mdl_name}"
+                    if model_key in models:
+                        from src.predict import predict_with_model
+                        preds = predict_with_model(models[model_key], test_df)
+                        predictions[model_key] = {"predictions": preds, "model_name": mdl_name, "target": target}
+                farm_target = f"farm_total_power_target_{horizon}"
+                farm_key = f"{farm_target}_{mdl_name}"
+                if farm_key in models:
+                    from src.predict import predict_with_model
+                    preds = predict_with_model(models[farm_key], test_df)
+                    predictions[farm_key] = {"predictions": preds, "model_name": mdl_name, "target": farm_target}
     else:
         logger.info("  evaluation_metrics.csv not found, running evaluation ...")
         test_df = get_test_data()
@@ -560,6 +578,10 @@ def generate_figures():
         plot_data_quality_bars, plot_ramp_alert_timeline,
         plot_farm_forecast_summary, plot_model_metrics_by_turbine,
         plot_farm_metrics_overview, plot_forecast_quality_distribution,
+        plot_best_model_scatter, plot_error_histogram,
+        plot_error_by_wind_speed, plot_error_by_power_region,
+        plot_error_by_season, plot_error_by_day_night,
+        plot_residual_analysis,
     )
 
     plot_performance_heatmap(results_df, str(fig_dir / "01_performance_heatmap.png"))
@@ -568,6 +590,14 @@ def generate_figures():
     plot_tb12_distribution(test_df, str(fig_dir / "14_tb12_distribution.png"))
     plot_model_comparison(results_df, str(fig_dir / "07_model_comparison.png"))
     plot_horizon_comparison(results_df, str(fig_dir / "08_horizon_comparison.png"))
+
+    plot_best_model_scatter(results_df, test_df, predictions, str(fig_dir / "03_best_model_scatter.png"))
+    plot_error_histogram(results_df, test_df, predictions, str(fig_dir / "04_error_histogram.png"))
+    plot_error_by_wind_speed(test_df, predictions, results_df, str(fig_dir / "13_error_by_wind_speed.png"))
+    plot_error_by_power_region(test_df, predictions, results_df, str(fig_dir / "09_error_by_power_region.png"))
+    plot_error_by_season(test_df, predictions, results_df, str(fig_dir / "10_error_by_season.png"))
+    plot_error_by_day_night(test_df, predictions, results_df, str(fig_dir / "11_error_by_day_night.png"))
+    plot_residual_analysis(test_df, predictions, results_df, str(fig_dir / "12_residual_analysis.png"))
 
     agg_cols = ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2"]
     available = [c for c in agg_cols if c in results_df.columns]
