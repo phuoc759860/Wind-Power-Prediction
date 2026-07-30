@@ -165,15 +165,10 @@ footer{text-align:center;padding:20px;color:var(--text-muted);font-size:.78rem;b
           <p>Multi-Horizon Power Forecasting Dashboard</p>
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <input type="password" id="apiKeyInput" placeholder="API Key"
-               style="padding:6px 12px;font-size:.78rem;border:1.5px solid var(--border);border-radius:var(--radius-xs);background:var(--surface-alt);font-family:inherit;width:130px;outline:none"
-               title="Enter API key (default: amg-wind-2024-dev)">
-        <div class="header-badge" id="statusBadge">
+      <div class="header-badge" id="statusBadge">
           <span class="dot"></span>
           <span id="statusText">Loading...</span>
         </div>
-      </div>
     </div>
     <div class="stats-row" id="stats"></div>
   </div>
@@ -332,6 +327,28 @@ footer{text-align:center;padding:20px;color:var(--text-muted);font-size:.78rem;b
         <canvas id="chartRadar"></canvas>
       </div>
     </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+      <div class="chart-wrapper" style="min-height:340px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">Conformal Prediction — Calibration Curve</div>
+        <canvas id="chartCalibration"></canvas>
+      </div>
+      <div class="chart-wrapper" style="min-height:340px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">Alert Accuracy (Avg Precision / Recall / F1)</div>
+        <canvas id="chartAlertAcc"></canvas>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+      <div class="chart-wrapper" style="min-height:340px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">Data Quality — Missing Rate by Column</div>
+        <canvas id="chartDataQual"></canvas>
+      </div>
+      <div class="chart-wrapper" style="min-height:340px">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:12px;color:var(--text)">Forecast Quality Distribution</div>
+        <canvas id="chartFcstQual"></canvas>
+      </div>
+    </div>
   </section>
 
   <!-- Evaluation Table -->
@@ -361,13 +378,11 @@ const API = '';
 let turbines = [], selectedTurbine = 'TB01', resultChart = null, resultCIChart = null, resultWaterfall = null;
 
 function getApiKey() {
-  return document.getElementById('apiKeyInput').value || localStorage.getItem('api_key') || '';
+  return '';
 }
 async function api(path, opts) {
   opts = opts || {};
   opts.headers = opts.headers || {};
-  const key = getApiKey();
-  if (key) opts.headers['Authorization'] = 'Bearer ' + key;
   const r = await fetch(API + path, opts);
   if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); throw new Error(e.detail||'Request failed'); }
   return r.json();
@@ -400,7 +415,7 @@ function r2BadgeClass(v) {
 
 async function loadTurbines() {
   turbines = await api('/turbines');
-  const avg = turbines.reduce((s,t)=>s+t.availability_pct,0)/turbines.length;
+  const avg = turbines.reduce((s,t)=>s+t.observed_availability_pct,0)/turbines.length;
   const cap = turbines.length * 2200;
 
   document.getElementById('stats').innerHTML = `
@@ -423,10 +438,10 @@ async function loadTurbines() {
     card.dataset.id = tb.id;
     card.onclick = () => selectTurbine(tb.id);
     card.innerHTML = `
-      <div class="tb-top"><span class="tb-id">${tb.id}</span><span class="tb-dot" style="background:${availColor(tb.availability_pct)}"></span></div>
-      <div class="tb-avail" style="color:${availColor(tb.availability_pct)}">${tb.availability_pct.toFixed(1)}<span style="font-size:.55em;font-weight:500;color:var(--text-muted)">%</span></div>
-      <div class="tb-bar"><div class="tb-bar-fill" style="width:${tb.availability_pct}%;background:${availColor(tb.availability_pct)}"></div></div>
-      <div class="tb-stats"><span>\u26a1 ${tb.generating_hours.toFixed(0)}h</span><span>\u23f8 ${tb.stopped_hours.toFixed(0)}h</span></div>
+      <div class="tb-top"><span class="tb-id">${tb.id}</span><span class="tb-dot" style="background:${availColor(tb.observed_availability_pct)}"></span></div>
+      <div class="tb-avail" style="color:${availColor(tb.observed_availability_pct)}">${tb.observed_availability_pct.toFixed(1)}<span style="font-size:.55em;font-weight:500;color:var(--text-muted)">%</span></div>
+      <div class="tb-bar"><div class="tb-bar-fill" style="width:${tb.observed_availability_pct}%;background:${availColor(tb.observed_availability_pct)}"></div></div>
+      <div class="tb-stats"><span>\u26a1 ${tb.generating_hours.toFixed(0)}h</span><span>\u23f8 ${tb.stopped_hours.toFixed(0)}h</span><span>\u2753 ${tb.missing_hours.toFixed(0)}h</span></div>
     `;
     grid.appendChild(card);
   });
@@ -793,18 +808,21 @@ function renderResults(data) {
 async function init() {
   showLoading(true);
   try {
-    // Restore API key from localStorage
-    const savedKey = localStorage.getItem('api_key');
-    if (savedKey) document.getElementById('apiKeyInput').value = savedKey;
-    document.getElementById('apiKeyInput').addEventListener('change', function() {
-      localStorage.setItem('api_key', this.value);
-    });
-
-    const evalData = await api('/evaluations');
-    const turbData = await api('/turbines');
+    const [evalData, turbData, calibData, alertData, dqData, fcstData] = await Promise.all([
+      api('/evaluations'),
+      api('/turbines'),
+      api('/outputs/coverage-calibration').catch(()=>null),
+      api('/outputs/alert-accuracy').catch(()=>null),
+      api('/outputs/data-quality').catch(()=>null),
+      api('/outputs/power-forecast?limit=500').catch(()=>null),
+    ]);
     await loadTurbines();
     loadEvalFromData(evalData);
     buildCharts(evalData, turbData);
+    buildCalibration(calibData);
+    buildAlertAcc(alertData);
+    buildDataQual(dqData);
+    buildFcstQual(fcstData);
   } catch(e) { showToast('Failed to load: '+e.message); }
   finally { showLoading(false); }
 }
@@ -921,7 +939,7 @@ function buildRMSE(data) {
 
 function buildAvail(turbData) {
   const labels = turbData.map(t=>t.id);
-  const vals = turbData.map(t=>t.availability_pct);
+  const vals = turbData.map(t=>t.observed_availability_pct);
   const cols = vals.map(v => v>=86?'#059669cc':v>=83?'#d97706cc':'#dc2626cc');
   const borders = vals.map(v => v>=86?'#059669':v>=83?'#d97706':'#dc2626');
 
@@ -993,6 +1011,170 @@ function buildRadar(data) {
       responsive:true,maintainAspectRatio:false,
       plugins:{legend:{labels:{color:'#475569',font:{size:11,weight:'500'},usePointStyle:true}}},
       scales:{r:{min:0,max:1,ticks:{display:false},grid:{color:'#e2e8f0'},pointLabels:{color:'#475569',font:{size:10,weight:'600'}},angleLines:{color:'#e2e8f0'}}}
+    }
+  });
+}
+
+function buildCalibration(data) {
+  if (!data || data.length === 0) return;
+  const byModel = {};
+  data.forEach(r => {
+    const k = r.model || 'unknown';
+    if (!byModel[k]) byModel[k] = {};
+    const conf = r.nominal_confidence;
+    if (!byModel[k][conf]) byModel[k][conf] = [];
+    byModel[k][conf].push(r.empirical_coverage);
+  });
+  const labels = [...new Set(data.map(r=>r.nominal_confidence))].sort();
+  const datasets = [];
+  const modelColors = {lightgbm:'#2563eb', xgboost:'#7c3aed'};
+  Object.keys(byModel).forEach(mdl => {
+    const vals = labels.map(c => {
+      const arr = byModel[mdl][c];
+      return arr ? arr.reduce((s,v)=>s+v,0)/arr.length : null;
+    });
+    datasets.push({
+      label: mdl.charAt(0).toUpperCase() + mdl.slice(1),
+      data: vals, borderColor: modelColors[mdl]||'#059669',
+      backgroundColor: (modelColors[mdl]||'#059669')+'22',
+      fill: false, tension: 0, pointRadius: 5, pointBackgroundColor: modelColors[mdl]||'#059669',
+      borderWidth: 2.5, showLine: true,
+    });
+  });
+  datasets.push({
+    label: 'Perfect calibration', data: labels,
+    borderColor: '#94a3b8', borderDash: [5,5], borderWidth: 1.5,
+    pointRadius: 0, fill: false, showLine: true,
+  });
+
+  new Chart(document.getElementById('chartCalibration'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color:'#475569', font:{size:11,weight:'500'}, usePointStyle:true }},
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.label === 'Perfect calibration') return '';
+              return ctx.dataset.label + ': nominal=' + ctx.parsed.x.toFixed(2) + ', empirical=' + ctx.parsed.y.toFixed(3);
+            }
+          }
+        }
+      },
+      scales: {
+        x: { min:0.4, max:1, grid:{color:'#f1f5f9'}, ticks:{color:'#94a3b8'}, border:{color:'#e2e8f0'}, title:{display:true,text:'Nominal Confidence',color:'#94a3b8',font:{size:11}} },
+        y: { min:0.2, max:1, grid:{color:'#f1f5f9'}, ticks:{color:'#94a3b8'}, border:{color:'#e2e8f0'}, title:{display:true,text:'Empirical Coverage',color:'#94a3b8',font:{size:11}} }
+      }
+    }
+  });
+}
+
+function buildAlertAcc(data) {
+  if (!data || data.length === 0) return;
+  const byTb = {};
+  data.forEach(r => {
+    if (!byTb[r.turbine_id]) byTb[r.turbine_id] = {p:[],r:[],f:[]};
+    byTb[r.turbine_id].p.push(r.precision);
+    byTb[r.turbine_id].r.push(r.recall);
+    byTb[r.turbine_id].f.push(r.f1);
+  });
+  const tbs = Object.keys(byTb).sort();
+  const precision = tbs.map(t => byTb[t].p.reduce((s,v)=>s+v,0)/byTb[t].p.length);
+  const recall = tbs.map(t => byTb[t].r.reduce((s,v)=>s+v,0)/byTb[t].r.length);
+  const f1 = tbs.map(t => byTb[t].f.reduce((s,v)=>s+v,0)/byTb[t].f.length);
+
+  new Chart(document.getElementById('chartAlertAcc'), {
+    type: 'bar',
+    data: {
+      labels: tbs,
+      datasets: [
+        { label: 'Precision', data: precision, backgroundColor: '#2563ebbb', borderColor: '#2563eb', borderWidth: 2, borderRadius: 4, barPercentage: .25 },
+        { label: 'Recall', data: recall, backgroundColor: '#059669bb', borderColor: '#059669', borderWidth: 2, borderRadius: 4, barPercentage: .25 },
+        { label: 'F1 Score', data: f1, backgroundColor: '#7c3aedbb', borderColor: '#7c3aed', borderWidth: 2, borderRadius: 4, barPercentage: .25 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color:'#475569', font:{size:11,weight:'500'}, usePointStyle:true }},
+        tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y*100).toFixed(1) + '%' } }
+      },
+      scales: {
+        y: { min:0.6, max:1, grid:{color:'#f1f5f9'}, ticks:{color:'#94a3b8', callback:v=>(v*100).toFixed(0)+'%'}, border:{color:'#e2e8f0'} },
+        x: { grid:{display:false}, ticks:{color:'#475569', font:{size:10,weight:'600'}}, border:{display:false} }
+      }
+    }
+  });
+}
+
+function buildDataQual(data) {
+  if (!data || data.length === 0) return;
+  const items = data
+    .map(r => ({ col: r.column, miss: parseFloat(String(r.missing_rate_pct).replace('%','')) || 0 }))
+    .filter(r => r.miss > 0)
+    .sort((a,b) => b.miss - a.miss)
+    .slice(0, 20);
+  if (items.length === 0) return;
+  const labels = items.map(r => r.col).reverse();
+  const vals = items.map(r => r.miss).reverse();
+  const colors = vals.map(v => v > 5 ? '#dc262688' : v > 1 ? '#d9770688' : '#05966988');
+  const borders = vals.map(v => v > 5 ? '#dc2626' : v > 1 ? '#d97706' : '#059669');
+
+  new Chart(document.getElementById('chartDataQual'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Missing Rate %', data: vals,
+        backgroundColor: colors, borderColor: borders,
+        borderWidth: 1.5, borderRadius: 4, barPercentage: .6,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ctx.parsed.x.toFixed(1) + '% missing' } }
+      },
+      scales: {
+        x: { grid:{color:'#f1f5f9'}, ticks:{color:'#94a3b8', callback:v=>v+'%'}, border:{color:'#e2e8f0'} },
+        y: { grid:{display:false}, ticks:{color:'#475569', font:{size:9,weight:'500'}}, border:{display:false} }
+      }
+    }
+  });
+}
+
+function buildFcstQual(data) {
+  if (!data || data.length === 0) return;
+  const counts = {};
+  data.forEach(r => { const q = r.forecast_quality || 'unknown'; counts[q] = (counts[q]||0) + 1; });
+  const labels = Object.keys(counts);
+  const vals = Object.values(counts);
+  const colorMap = { production:'#059669', reference_only:'#94a3b8', low_confidence:'#d97706', stale:'#dc2626', unknown:'#94a3b8' };
+  const colors = labels.map(l => colorMap[l]||'#94a3b8');
+  const borderColors = labels.map(l => colorMap[l]||'#94a3b8');
+
+  new Chart(document.getElementById('chartFcstQual'), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: vals,
+        backgroundColor: colors.map(c => c+'cc'),
+        borderColor: borderColors,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: {
+        legend: { position:'bottom', labels: { color:'#475569', font:{size:11,weight:'500'}, usePointStyle:true, padding:14 }},
+        tooltip: { callbacks: { label: ctx => ctx.label + ': ' + ctx.parsed + ' (' + ((ctx.parsed/vals.reduce((s,v)=>s+v,0))*100).toFixed(1) + '%)' } }
+      }
     }
   });
 }

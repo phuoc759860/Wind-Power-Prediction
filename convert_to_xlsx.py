@@ -37,28 +37,11 @@ def _write_fast(df, xlsx_path):
     df.to_excel(str(xlsx_path), index=False, engine="openpyxl")
 
 
-def _write_power_forecast_by_turbine(csv_path, xlsx_path):
-    """Split power_forecast.csv (5.6M rows) into per-turbine sheets."""
-    logger.info("    Reading power_forecast.csv (5.6M rows)...")
+def _write_power_forecast_single_sheet(csv_path, xlsx_path):
+    """Write power_forecast.csv as a single sheet (fast path)."""
     df = pd.read_csv(csv_path)
-    total_rows = len(df)
-
-    logger.info("    Writing per-turbine sheets...")
-    with pd.ExcelWriter(str(xlsx_path), engine="openpyxl") as writer:
-        # Summary sheet
-        summary = pd.DataFrame({
-            "Info": ["Power Forecast - AMG Wind Farm"],
-            "Total Rows": [f"{total_rows:,}"],
-            "Columns": ["timestamp_issue, timestamp_target, turbine_id, horizon_min, y_pred, y_low, y_high, model_version"],
-        })
-        summary.to_excel(writer, sheet_name="Summary", index=False)
-
-        for tb in TURBINES:
-            tb_df = df[df["turbine_id"] == tb].drop(columns=["turbine_id"], errors="ignore")
-            if not tb_df.empty:
-                tb_df.to_excel(writer, sheet_name=tb, index=False)
-
-    return total_rows
+    df.to_excel(str(xlsx_path), index=False, engine="openpyxl")
+    return len(df)
 
 
 def _open_and_format(xlsx_path, title, num_fmts=None, color_cols=None, color_map=None):
@@ -143,27 +126,31 @@ def convert_all():
     results = []
 
     for csv_path in csv_files:
+        logger.info(f"  Converting {csv_path.name}...")
         xlsx_path = XLSX_DIR / f"{csv_path.stem}.xlsx"
 
+        name = csv_path.stem
+
+        # Skip raw forecast dump — 340 MB, 781 cols, not a curated output file
+        if name == "forecasts":
+            results.append((name, 0))
+            logger.info(f"    Skipping {name}.csv (raw forecast dump, too wide for XLSX)")
+            continue
+
         if csv_path.stat().st_size < 10:
-            # Empty CSV — create minimal xlsx
             df = pd.DataFrame(columns=["Info"])
             df.loc[0] = ["No data available"]
             _write_fast(df, xlsx_path)
             results.append((csv_path.stem, 0))
-            logger.info(f"  {csv_path.stem}.xlsx (empty)")
+            logger.info(f"    {csv_path.stem}.xlsx (empty)")
             continue
 
         df = pd.read_csv(csv_path)
 
-        # Apply formatting based on file type
-        name = csv_path.stem
-
         if name == "power_forecast":
-            # Special handling: too large for single sheet, split by turbine
-            total_rows = _write_power_forecast_by_turbine(csv_path, xlsx_path)
+            total_rows = _write_power_forecast_single_sheet(csv_path, xlsx_path)
             results.append((name, total_rows))
-            logger.info(f"  {name}.xlsx ({total_rows:,} rows, split by turbine)")
+            logger.info(f"    {name}.xlsx ({total_rows:,} rows)")
             continue
 
         _write_fast(df, xlsx_path)

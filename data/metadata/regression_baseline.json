@@ -1,0 +1,62 @@
+{
+  "TB01_power_target_10min": {
+    "rmse": 157.55,
+    "r2": 0.9394
+  },
+  "TB01_power_target_30min": {
+    "rmse": 254.54,
+    "r2": 0.8417
+  },
+  "TB01_power_target_1hour": {
+    "rmse": 333.94,
+    "r2": 0.7276
+  },
+  "TB01_power_target_6hour": {
+    "rmse": 480.13,
+    "r2": 0.437
+  },
+  "TB01_power_target_24hour": {
+    "rmse": 565.64,
+    "r2": 0.2194
+  },
+  "TB02_power_target_10min": {
+    "rmse": 150.55,
+    "r2": 0.9454
+  },
+  "TB02_power_target_30min": {
+    "rmse": 248.25,
+    "r2": 0.8516
+  },
+  "TB02_power_target_1hour": {
+    "rmse": 322.17,
+    "r2": 0.7501
+  },
+  "TB02_power_target_6hour": {
+    "rmse": 479.56,
+    "r2": 0.4463
+  },
+  "TB02_power_target_24hour": {
+    "rmse": 571.35,
+    "r2": 0.2154
+  },
+  "TB03_power_target_10min": {
+    "rmse": 159.0,
+    "r2": 0.9346
+  },
+  "TB03_power_target_30min": {
+    "rmse": 259.75,
+    "r2": 0.8254
+  },
+  "TB03_power_target_1hour": {
+    "rmse": 332.82,
+    "r2": 0.7133
+  },
+  "TB03_power_target_6hour": {
+    "rmse": 486.2,
+    "r2": 0.3883
+  },
+  "TB03_power_target_24hour": {
+    "rmse": 554.73,
+    "r2": 0.2053
+  }
+}

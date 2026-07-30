@@ -1220,3 +1220,255 @@ def evaluate_coverage_calibration(test_data: pd.DataFrame, predictions: Dict,
         os.makedirs(output_dir, exist_ok=True)
         df.to_csv(os.path.join(output_dir, "coverage_calibration.csv"), index=False)
     return df
+
+
+def plot_conformal_forecast_timeseries(power_df: pd.DataFrame, save_path: str = None):
+    df = power_df.copy()
+    if df.empty:
+        return
+    df["ts"] = pd.to_datetime(df["timestamp_target"])
+    sample_turbine = df["turbine_id"].iloc[0] if "turbine_id" in df.columns else "TB01"
+    sub = df[df["turbine_id"] == sample_turbine].sort_values("ts")
+    if sub.empty:
+        return
+    sub = sub.head(500)
+
+    fig, ax = plt.subplots(figsize=(16, 5))
+    ax.fill_between(sub["ts"], sub["y_low"], sub["y_high"], alpha=0.25, color="#3498db", label="80% conformal interval")
+    ax.plot(sub["ts"], sub["y_pred"], color="#2c3e50", linewidth=1.2, label="Prediction")
+    ax.set_title(f"Conformal Power Forecast — {sample_turbine}", fontsize=13)
+    ax.set_ylabel("Power (kW)")
+    ax.set_xlabel("Time")
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.2)
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_coverage_calibration_curve(coverage_df: pd.DataFrame, save_path: str = None):
+    df = coverage_df.copy()
+    if df.empty:
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    for mdl in df["model"].unique():
+        sub = df[df["model"] == mdl]
+        agg = sub.groupby("nominal_confidence")["empirical_coverage"].mean().reset_index()
+        ax.plot(agg["nominal_confidence"], agg["empirical_coverage"], marker="o", linewidth=2,
+                label=_model_display_name(mdl), markersize=6)
+    ax.plot([0, 1], [0, 1], "k--", linewidth=1, alpha=0.5, label="Perfect calibration")
+    ax.set_xlabel("Nominal Confidence", fontsize=11)
+    ax.set_ylabel("Empirical Coverage", fontsize=11)
+    ax.set_title("Conformal Prediction — Calibration Curve", fontsize=13)
+    ax.legend(fontsize=10)
+    ax.set_xlim(0.4, 1.01)
+    ax.set_ylim(0.2, 1.01)
+    ax.grid(True, alpha=0.3)
+    ax.set_aspect("equal")
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_alert_accuracy_dashboard(acc_df: pd.DataFrame, save_path: str = None):
+    df = acc_df.copy()
+    if df.empty:
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    metrics_list = [("precision", "Precision"), ("recall", "Recall"), ("f1", "F1 Score"), ("false_alarm_rate", "False Alarm Rate")]
+    for ax, (col, label) in zip(axes.flat, metrics_list):
+        pivot = df.pivot_table(index="turbine_id", columns="horizon", values=col, aggfunc="mean")
+        pivot = pivot.reindex(index=sorted(pivot.index))
+        pivot.plot(kind="bar", ax=ax, colormap="viridis", edgecolor="white", linewidth=0.5)
+        ax.set_title(label, fontsize=12)
+        ax.set_ylabel(label)
+        ax.set_xlabel("")
+        ax.legend(title="Horizon", fontsize=8)
+        ax.grid(True, alpha=0.2, axis="y")
+        ax.set_ylim(0, 1.05)
+    plt.suptitle("Alert Accuracy by Turbine & Horizon", fontsize=14, y=1.01)
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_failure_risk_heatmap(failure_df: pd.DataFrame, save_path: str = None):
+    df = failure_df.copy()
+    if df.empty:
+        return
+    df["ts"] = pd.to_datetime(df["timestamp"])
+    df["date"] = df["ts"].dt.date
+    pivot = df.pivot_table(index="turbine_id", columns="date", values="stop_risk_score", aggfunc="mean")
+    if pivot.empty:
+        return
+
+    fig, ax = plt.subplots(figsize=(18, 6))
+    sns.heatmap(pivot, ax=ax, cmap="YlOrRd", linewidths=0.3, cbar_kws={"label": "Stop Risk Score"},
+                vmin=0, vmax=1.0)
+    ax.set_title("Failure Risk (Stop Risk Score) by Turbine — Daily Average", fontsize=13)
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Turbine")
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_data_quality_bars(dq_df: pd.DataFrame, save_path: str = None):
+    df = dq_df.copy()
+    if df.empty or "missing_rate_pct" not in df.columns:
+        return
+    df["missing_pct"] = pd.to_numeric(df["missing_rate_pct"].str.rstrip("%"), errors="coerce").fillna(0)
+    df = df.sort_values("missing_pct", ascending=False).head(30)
+
+    fig, ax = plt.subplots(figsize=(12, max(6, len(df) * 0.3)))
+    colors = ["#e74c3c" if v > 5 else "#f39c12" if v > 1 else "#2ecc71" for v in df["missing_pct"]]
+    ax.barh(range(len(df)), df["missing_pct"].values, color=colors, edgecolor="white", linewidth=0.5)
+    ax.set_yticks(range(len(df)))
+    ax.set_yticklabels(df["column"].values, fontsize=8)
+    ax.set_xlabel("Missing Rate (%)")
+    ax.set_title("Data Quality — Missing Rate by Column", fontsize=13)
+    ax.grid(True, alpha=0.2, axis="x")
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_ramp_alert_timeline(ramp_df: pd.DataFrame, save_path: str = None):
+    df = ramp_df.copy()
+    if df.empty:
+        return
+    df["ts"] = pd.to_datetime(df["timestamp"])
+    df = df.sort_values("ts").head(500)
+    ramp_types = df["ramp_type"].unique()
+    palette = {t: c for t, c in zip(ramp_types, sns.color_palette("Set2", len(ramp_types)))}
+
+    fig, ax = plt.subplots(figsize=(16, 5))
+    for rtype in ramp_types:
+        sub = df[df["ramp_type"] == rtype]
+        ax.scatter(sub["ts"], sub["expected_change"], label=rtype, alpha=0.7, s=sub["probability"] * 200,
+                   color=[palette[rtype]], edgecolors="black", linewidth=0.3)
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Expected Ramp Change (kW)")
+    ax.set_title("Ramp Alerts — Size & Probability", fontsize=13)
+    ax.legend(fontsize=9, title="Ramp Type")
+    ax.grid(True, alpha=0.2)
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_farm_forecast_summary(farm_df: pd.DataFrame, save_path: str = None):
+    df = farm_df.copy()
+    if df.empty:
+        return
+    df["ts"] = pd.to_datetime(df["timestamp_target"])
+    df = df.sort_values("ts").head(500)
+
+    fig, ax = plt.subplots(figsize=(16, 5))
+    ax.fill_between(df["ts"], df["farm_power_low"], df["farm_power_high"], alpha=0.25, color="#e67e22", label="80% conformal interval")
+    ax.plot(df["ts"], df["farm_power_pred"], color="#d35400", linewidth=1.5, label="Farm power forecast")
+    ax.plot(df["ts"], df["farm_energy_pred"], color="#2ecc71", linewidth=1, alpha=0.7, label="Farm energy forecast")
+    ax.set_title("Farm-Level Power & Energy Forecast", fontsize=13)
+    ax.set_ylabel("Power (kW) / Energy (kWh)")
+    ax.set_xlabel("Time")
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.2)
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_model_metrics_by_turbine(metrics_df: pd.DataFrame, save_path: str = None):
+    df = metrics_df.copy()
+    if df.empty:
+        return
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    for ax, metric, label in zip(axes, ["RMSE", "nRMSE", "R2"], ["RMSE (kW)", "nRMSE (%)", "R\u00B2"]):
+        pivot = df.pivot_table(index="turbine_id", columns="model", values=metric, aggfunc="mean")
+        pivot = pivot.reindex(index=sorted(pivot.index))
+        if pivot.empty:
+            continue
+        pivot.plot(kind="bar", ax=ax, edgecolor="white", linewidth=0.5)
+        ax.set_title(label, fontsize=12)
+        ax.set_ylabel(label)
+        ax.set_xlabel("")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.2, axis="y")
+    plt.suptitle("Model Performance by Turbine", fontsize=14, y=1.01)
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_farm_metrics_overview(farm_metrics_df: pd.DataFrame, save_path: str = None):
+    df = farm_metrics_df.copy()
+    if df.empty:
+        return
+
+    df["label"] = df["target"] + " (" + df["model"] + ")"
+    df = df.sort_values("rmse", ascending=False)
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+    for ax, (metric, label) in zip(axes, [("rmse", "RMSE (kW)"), ("mae", "MAE (kW)"), ("r2", "R\u00B2")]):
+        colors = ["#3498db" if "lightgbm" in t else "#e74c3c" for t in df["label"]]
+        bars = ax.barh(range(len(df)), df[metric].values, color=colors, edgecolor="white", linewidth=0.5)
+        ax.set_yticks(range(len(df)))
+        ax.set_yticklabels(df["label"].values, fontsize=7)
+        ax.set_xlabel(label)
+        ax.set_title(label, fontsize=11)
+        ax.grid(True, alpha=0.2, axis="x")
+    fig.legend([plt.Rectangle((0, 0), 1, 1, fc="#3498db"), plt.Rectangle((0, 0), 1, 1, fc="#e74c3c")],
+               ["LightGBM", "XGBoost"], loc="lower right", fontsize=9)
+    plt.suptitle("Farm-Level Metrics by Horizon & Model", fontsize=13, y=1.01)
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_forecast_quality_distribution(power_df: pd.DataFrame, save_path: str = None):
+    df = power_df.copy()
+    if df.empty or "forecast_quality" not in df.columns:
+        return
+    counts = df["forecast_quality"].value_counts()
+    colors = {"ok": "#2ecc71", "low_confidence": "#f39c12", "stale": "#e74c3c"}
+    bar_colors = [colors.get(k, "#95a5a6") for k in counts.index]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    ax1.pie(counts.values, labels=counts.index, autopct="%1.1f%%", colors=bar_colors, startangle=90, wedgeprops={"edgecolor": "white"})
+    ax1.set_title("Forecast Quality Distribution", fontsize=12)
+    ax2.bar(range(len(counts)), counts.values, color=bar_colors, edgecolor="white", linewidth=0.5)
+    ax2.set_xticks(range(len(counts)))
+    ax2.set_xticklabels(counts.index)
+    ax2.set_ylabel("Forecast Count")
+    ax2.set_title("Forecast Quality Counts", fontsize=12)
+    ax2.grid(True, alpha=0.2, axis="y")
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()

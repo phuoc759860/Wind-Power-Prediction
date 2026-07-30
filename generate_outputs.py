@@ -555,6 +555,11 @@ def generate_figures():
     from src.evaluate import (
         plot_performance_heatmap, plot_horizon_decay, plot_radar_summary,
         plot_tb12_distribution, plot_model_comparison, plot_horizon_comparison,
+        plot_conformal_forecast_timeseries, plot_coverage_calibration_curve,
+        plot_alert_accuracy_dashboard, plot_failure_risk_heatmap,
+        plot_data_quality_bars, plot_ramp_alert_timeline,
+        plot_farm_forecast_summary, plot_model_metrics_by_turbine,
+        plot_farm_metrics_overview, plot_forecast_quality_distribution,
     )
 
     plot_performance_heatmap(results_df, str(fig_dir / "01_performance_heatmap.png"))
@@ -568,6 +573,33 @@ def generate_figures():
     available = [c for c in agg_cols if c in results_df.columns]
     summary = results_df.groupby("model")[available].mean().round(4)
     summary.to_csv(fig_dir / "model_summary.csv")
+
+    csv_plots = [
+        ("power_forecast.csv", plot_conformal_forecast_timeseries, "15_conformal_power_forecast.png"),
+        ("coverage_calibration.csv", plot_coverage_calibration_curve, "16_coverage_calibration.png"),
+        ("alert_accuracy.csv", plot_alert_accuracy_dashboard, "17_alert_accuracy.png"),
+        ("failure_risk.csv", plot_failure_risk_heatmap, "18_failure_risk_heatmap.png"),
+        ("data_quality_report.csv", plot_data_quality_bars, "19_data_quality.png"),
+        ("ramp_alert.csv", plot_ramp_alert_timeline, "20_ramp_alert_timeline.png"),
+        ("farm_forecast.csv", plot_farm_forecast_summary, "21_farm_forecast_timeseries.png"),
+        ("metrics.csv", plot_model_metrics_by_turbine, "22_model_comparison_turbine.png"),
+        ("farm_metrics.csv", plot_farm_metrics_overview, "23_farm_metrics.png"),
+    ]
+    for csv_name, plot_fn, png_name in csv_plots:
+        csv_path = OUT / csv_name
+        if csv_path.exists():
+            try:
+                df = pd.read_csv(csv_path)
+                if not df.empty:
+                    plot_fn(df, str(fig_dir / png_name))
+            except Exception:
+                pass
+
+    try:
+        power_df = pd.read_csv(OUT / "power_forecast.csv")
+        plot_forecast_quality_distribution(power_df, str(fig_dir / "24_forecast_quality.png"))
+    except Exception:
+        pass
 
     logger.info(f"  {len(list(fig_dir.glob('*.png')))} figures saved to {fig_dir}")
 
@@ -629,6 +661,66 @@ def generate_failure_risk(test_df):
     logger.info(f"  failure_risk.csv: {df.shape[0]} rows")
 
 
+def generate_alert_accuracy(test_df, models):
+    """Generate alert_accuracy.csv — ramp detection precision/recall/F1 per turbine x horizon"""
+    logger.info("Generating alert_accuracy.csv ...")
+    config = load_config()
+    predictions = {}
+    for tb in TURBINES:
+        for horizon in HORIZON_NAMES:
+            for mdl_name in ["lightgbm", "xgboost"]:
+                target = f"{tb}_power_target_{horizon}"
+                model_key = f"{target}_{mdl_name}"
+                if model_key in models:
+                    from src.predict import predict_with_model
+                    preds = predict_with_model(models[model_key], test_df)
+                    predictions[model_key] = {"predictions": preds, "model_name": mdl_name, "target": target}
+
+    from src.evaluate import evaluate_alert_accuracy
+    results = evaluate_alert_accuracy(test_df, predictions)
+    rows = []
+    for key, r in results.items():
+        rows.append({
+            "turbine_id": r["turbine_id"],
+            "horizon": r["horizon"],
+            "model": r["model"],
+            "n_actual_events": r["n_actual_events"],
+            "n_predicted_events": r["n_predicted_events"],
+            "precision": r["precision"],
+            "recall": r["recall"],
+            "f1": r["f1"],
+            "false_alarm_rate": r["false_alarm_rate"],
+            "balanced_accuracy": r["balanced_accuracy"],
+        })
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "alert_accuracy.csv", index=False)
+    logger.info(f"  alert_accuracy.csv: {df.shape[0]} rows")
+
+
+def generate_anomaly_accuracy(test_df):
+    """Generate anomaly_accuracy.csv — anomaly detection precision/recall/F1 per turbine"""
+    logger.info("Generating anomaly_accuracy.csv ...")
+    from src.evaluate import evaluate_anomaly_detection
+    results = evaluate_anomaly_detection(test_df)
+    rows = []
+    for tb, r in results.items():
+        rows.append({
+            "turbine_id": tb,
+            "method": r["method"],
+            "n_gt_anomalies": r["n_gt_anomalies"],
+            "n_detected": r["n_detected"],
+            "precision": r["precision"],
+            "recall": r["recall"],
+            "f1": r["f1"],
+            "false_alarm_rate": r["false_alarm_rate"],
+            "power_anomaly_precision": r.get("power_anomaly_precision", 0),
+            "wind_curve_anomaly_precision": r.get("wind_curve_anomaly_precision", 0),
+        })
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "anomaly_accuracy.csv", index=False)
+    logger.info(f"  anomaly_accuracy.csv: {df.shape[0]} rows")
+
+
 def generate_all():
     test_df = get_test_data()
     logger.info(f"Test data: {test_df.shape}")
@@ -644,6 +736,8 @@ def generate_all():
     generate_anomaly_alert(test_df)
     generate_failure_risk(test_df)
     generate_temperature_warning(test_df)
+    generate_alert_accuracy(test_df, models)
+    generate_anomaly_accuracy(test_df)
     generate_coverage_calibration(test_df, models)
 
 

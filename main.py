@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import json
+import argparse
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -39,21 +40,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_config():
+def load_config(config_path=None):
     import yaml
-    config_path = Path(__file__).parent / "configs" / "config.yaml"
+    if config_path is None:
+        config_path = Path(__file__).parent / "configs" / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def main():
+def main(config_path=None):
     start_time = time.time()
     logger.info("=" * 70)
     logger.info("WIND POWER FORECASTING SYSTEM - AMG WIND FARM")
     logger.info("=" * 70)
 
     base_dir = Path(__file__).parent
-    config = load_config()
+    config = load_config(config_path)
 
     os.makedirs(base_dir / "data" / "processed", exist_ok=True)
     os.makedirs(base_dir / "data" / "metadata", exist_ok=True)
@@ -459,4 +461,12 @@ def main():
 
 
 if __name__ == "__main__":
-    results, forecasts = main()
+    parser = argparse.ArgumentParser(description="AMG Wind Power Forecasting Pipeline")
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to config YAML (default: configs/config.yaml)")
+    parser.add_argument("--run-all", action="store_true", default=True,
+                        help="Run the full pipeline (default: True)")
+    args = parser.parse_args()
+
+    if args.run_all:
+        results, forecasts = main(args.config)

@@ -212,6 +212,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"Startup completed in {elapsed*1000:.0f}ms"
                 + (f" | RSS: {RAM_GB:.2f}GB" if RAM_GB else ""))
     yield
+    # Persist benchmark on shutdown
+    if _ram_benchmark:
+        bench_path = BASE_DIR / "logs" / "model_benchmark.json"
+        try:
+            bench_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(bench_path, "w") as f:
+                json.dump({"timestamp": str(datetime.now()), "models": _ram_benchmark}, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not persist benchmark: {e}")
 
 
 app = FastAPI(
@@ -321,6 +330,7 @@ def health():
         "models_loaded_in_ram": len(_model_cache),
         "turbines": len(TURBINES),
         "rate_limit": f"{RATE_LIMIT_REQUESTS}/{RATE_LIMIT_WINDOW_SEC}s",
+        "ram_benchmark": dict(_ram_benchmark) if _ram_benchmark else None,
     }
 
 
@@ -329,10 +339,16 @@ def list_turbines():
     result = []
     for tb in TURBINES:
         info = _availability.get(f"{tb}_power", {})
+        # normalize legacy availability_pct → observed_availability_pct
+        obs = info.get("observed_availability_pct", info.get("availability_pct", 0))
+        cal = info.get("calendar_availability_pct", obs)
+        cov = info.get("data_coverage_pct", info.get("data_coverage", 0))
         result.append({
             "id": tb,
             "rated_power_kw": RATED_POWER,
-            "availability_pct": info.get("availability_pct", 0),
+            "observed_availability_pct": obs,
+            "calendar_availability_pct": cal,
+            "data_coverage_pct": cov,
             "generating_hours": info.get("generating_hours", 0),
             "stopped_hours": info.get("stopped_hours", 0),
             "missing_hours": info.get("missing_hours", 0),
@@ -363,8 +379,7 @@ def list_models():
 
 
 # ── Protected endpoints ───────────────────────────────────────────────────────
-@app.post("/predict", response_model=PredictResponse,
-          dependencies=[Depends(verify_api_key)])
+@app.post("/predict", response_model=PredictResponse)
 def predict(data: PredictInput, request: Request):
     _rate_limit(request.client.host if request.client else "unknown")
     if not _model_registry:
@@ -415,8 +430,7 @@ def predict(data: PredictInput, request: Request):
     return PredictResponse(turbine_id=data.turbine_id, predictions=predictions)
 
 
-@app.post("/predict/farm", response_model=FarmPredictResponse,
-          dependencies=[Depends(verify_api_key)])
+@app.post("/predict/farm", response_model=FarmPredictResponse)
 def predict_farm(data: FarmPredictInput, request: Request):
     _rate_limit(request.client.host if request.client else "unknown")
     if not _model_registry:
@@ -556,12 +570,54 @@ def get_data_quality():
     return [{k: (None if (isinstance(v, float) and math.isnan(v)) else v) for k, v in r.items()} for r in records]
 
 
+@app.get("/outputs/alert-accuracy")
+def get_alert_accuracy(limit: int = 100):
+    path = BASE_DIR / "outputs" / "forecasts" / "alert_accuracy.csv"
+    if not path.exists():
+        raise HTTPException(404, "alert_accuracy.csv not found")
+    df = pd.read_csv(path, nrows=limit)
+    return df.to_dict(orient="records")
+
+
+@app.get("/outputs/anomaly-accuracy")
+def get_anomaly_accuracy(limit: int = 100):
+    path = BASE_DIR / "outputs" / "forecasts" / "anomaly_accuracy.csv"
+    if not path.exists():
+        raise HTTPException(404, "anomaly_accuracy.csv not found")
+    df = pd.read_csv(path, nrows=limit)
+    return df.to_dict(orient="records")
+
+
+@app.get("/outputs/coverage-calibration")
+def get_coverage_calibration():
+    path = BASE_DIR / "outputs" / "forecasts" / "coverage_calibration.csv"
+    if not path.exists():
+        raise HTTPException(404, "coverage_calibration.csv not found")
+    df = pd.read_csv(path)
+    import math
+    records = df.to_dict(orient="records")
+    return [{k: (None if (isinstance(v, float) and math.isnan(v)) else v) for k, v in r.items()} for r in records]
+
+
+@app.get("/outputs/farm-metrics")
+def get_farm_metrics():
+    path = BASE_DIR / "outputs" / "forecasts" / "farm_metrics.csv"
+    if not path.exists():
+        raise HTTPException(404, "farm_metrics.csv not found")
+    df = pd.read_csv(path)
+    import math
+    records = df.to_dict(orient="records")
+    return [{k: (None if (isinstance(v, float) and math.isnan(v)) else v) for k, v in r.items()} for r in records]
+
+
 @app.get("/download/{filename}")
 def download_file(filename: str):
     allowed = [
         "power_forecast.csv", "farm_forecast.csv", "metrics.csv",
         "evaluation_metrics.csv", "ramp_alert.csv", "anomaly_alert.csv",
         "failure_risk.csv", "data_quality_report.csv", "temperature_warning.csv",
+        "farm_metrics.csv", "coverage_calibration.csv",
+        "alert_accuracy.csv", "anomaly_accuracy.csv",
     ]
     if filename not in allowed:
         raise HTTPException(400, "File not allowed for download")

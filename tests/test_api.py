@@ -42,7 +42,8 @@ def test_turbines(client):
     assert len(data) == 12
     for tb in data:
         assert "id" in tb
-        assert "availability_pct" in tb
+        assert "observed_availability_pct" in tb
+        assert tb["observed_availability_pct"] > 0
 
 
 def test_models(client):
@@ -135,6 +136,16 @@ def test_data_quality(client):
 
 def test_ramp_alerts(client):
     r = client.get("/outputs/ramp-alerts?limit=5")
+    assert r.status_code in (200, 404)
+
+
+def test_alert_accuracy(client):
+    r = client.get("/outputs/alert-accuracy?limit=5")
+    assert r.status_code in (200, 404)
+
+
+def test_anomaly_accuracy(client):
+    r = client.get("/outputs/anomaly-accuracy?limit=5")
     assert r.status_code in (200, 404)
 
 
