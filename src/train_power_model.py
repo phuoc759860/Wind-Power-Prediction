@@ -81,45 +81,19 @@ def scale_features(X_train, X_val=None, X_test=None):
     return scaler, X_train_scaled, X_val_scaled, X_test_scaled
 
 
-def train_random_forest(X_train: np.ndarray, y_train: np.ndarray, config: dict = None) -> RandomForestRegressor:
+def train_random_forest(X_train: np.ndarray, y_train: np.ndarray, config: dict = None,
+                         X_val=None, y_val=None, feature_cols=None) -> RandomForestRegressor:
     params = (config or {}).get("models", {}).get("random_forest", {})
     model = RandomForestRegressor(**params)
     model.fit(X_train, y_train)
     return model
 
 
-def train_xgboost(X_train: np.ndarray, y_train: np.ndarray, config: dict = None):
-    if not HAS_XGB:
-        logger.warning("XGBoost not installed")
-        return None
-    params = (config or {}).get("models", {}).get("xgboost", {})
-    model = xgb.XGBRegressor(**params)
-    model.fit(X_train, y_train, verbose=False)
-    return model
-
-
-def train_lightgbm(X_train: np.ndarray, y_train: np.ndarray, config: dict = None):
-    if not HAS_LGBM:
-        logger.warning("LightGBM not installed")
-        return None
-    params = (config or {}).get("models", {}).get("lightgbm", {})
-    model = lgb.LGBMRegressor(**params)
-    model.fit(X_train, y_train)
-    return model
-
-
-def train_linear_reg(X_train: np.ndarray, y_train: np.ndarray, config: dict = None) -> LinearRegression:
+def train_linear_reg(X_train: np.ndarray, y_train: np.ndarray, config: dict = None,
+                      X_val=None, y_val=None, feature_cols=None) -> LinearRegression:
     model = LinearRegression()
     model.fit(X_train, y_train)
     return model
-
-
-MODEL_TRAINERS = {
-    "random_forest": train_random_forest,
-    "xgboost": train_xgboost,
-    "lightgbm": train_lightgbm,
-    "linear_regression": train_linear_reg,
-}
 
 
 def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
@@ -151,7 +125,8 @@ def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
         logger.info(f"  Training {model_name}...")
         try:
             trainer = MODEL_TRAINERS[model_name]
-            model = trainer(X_train_s, y_train.values, config)
+            model = trainer(X_train_s, y_train.values, config,
+                            X_val=X_val_s, y_val=y_val.values, feature_cols=feature_cols)
 
             if model is None:
                 continue
@@ -289,6 +264,14 @@ def _tune_lightgbm(X_train, y_train, X_val, y_val, feature_cols, config):
     model = lgb.LGBMRegressor(**best_params)
     model.fit(np.vstack([X_train, X_val]), np.concatenate([y_train, y_val]))
     return model
+
+
+MODEL_TRAINERS = {
+    "random_forest": train_random_forest,
+    "xgboost": _tune_xgboost,
+    "lightgbm": _tune_lightgbm,
+    "linear_regression": train_linear_reg,
+}
 
 
 def walk_forward_ml(df: pd.DataFrame, target_col: str, config: dict,

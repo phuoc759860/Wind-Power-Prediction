@@ -165,9 +165,14 @@ footer{text-align:center;padding:20px;color:var(--text-muted);font-size:.78rem;b
           <p>Multi-Horizon Power Forecasting Dashboard</p>
         </div>
       </div>
-      <div class="header-badge" id="statusBadge">
-        <span class="dot"></span>
-        <span id="statusText">Loading...</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="password" id="apiKeyInput" placeholder="API Key"
+               style="padding:6px 12px;font-size:.78rem;border:1.5px solid var(--border);border-radius:var(--radius-xs);background:var(--surface-alt);font-family:inherit;width:130px;outline:none"
+               title="Enter API key (default: amg-wind-2024-dev)">
+        <div class="header-badge" id="statusBadge">
+          <span class="dot"></span>
+          <span id="statusText">Loading...</span>
+        </div>
       </div>
     </div>
     <div class="stats-row" id="stats"></div>
@@ -355,7 +360,14 @@ footer{text-align:center;padding:20px;color:var(--text-muted);font-size:.78rem;b
 const API = '';
 let turbines = [], selectedTurbine = 'TB01', resultChart = null, resultCIChart = null, resultWaterfall = null;
 
+function getApiKey() {
+  return document.getElementById('apiKeyInput').value || localStorage.getItem('api_key') || '';
+}
 async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || {};
+  const key = getApiKey();
+  if (key) opts.headers['Authorization'] = 'Bearer ' + key;
   const r = await fetch(API + path, opts);
   if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); throw new Error(e.detail||'Request failed'); }
   return r.json();
@@ -781,6 +793,13 @@ function renderResults(data) {
 async function init() {
   showLoading(true);
   try {
+    // Restore API key from localStorage
+    const savedKey = localStorage.getItem('api_key');
+    if (savedKey) document.getElementById('apiKeyInput').value = savedKey;
+    document.getElementById('apiKeyInput').addEventListener('change', function() {
+      localStorage.setItem('api_key', this.value);
+    });
+
     const evalData = await api('/evaluations');
     const turbData = await api('/turbines');
     await loadTurbines();

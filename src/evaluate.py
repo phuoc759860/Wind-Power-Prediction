@@ -1162,3 +1162,62 @@ def generate_evaluation_report(results_df: pd.DataFrame, save_dir: str,
         logger.info(f"\n{summary.to_string()}")
 
     return results_df
+
+
+def evaluate_coverage_calibration(test_data: pd.DataFrame, predictions: Dict,
+                                  config: dict = None, confidence_levels: List[float] = None,
+                                  output_dir: str = None) -> pd.DataFrame:
+    if confidence_levels is None:
+        confidence_levels = [0.5, 0.8, 0.9, 0.95, 0.99]
+    records = []
+
+    for model_key, pred_info in predictions.items():
+        model_name = pred_info.get("model_name", "unknown")
+        target = pred_info.get("target", model_key)
+        pred_values = pred_info.get("predictions")
+        if pred_values is None:
+            continue
+
+        actual = test_data[target].values[:len(pred_values)] if target in test_data.columns else None
+        if actual is None:
+            continue
+
+        horizon = "unknown"
+        if config:
+            for h in config.get("forecasting", {}).get("horizons", []):
+                if f"_target_{h['name']}" in target:
+                    horizon = h["name"]
+                    break
+
+        errors = np.abs(actual - pred_values)
+        n = len(errors)
+        if n == 0:
+            continue
+
+        for conf in confidence_levels:
+            alpha = 1 - conf
+            q_lo = np.quantile(errors, alpha / 2)
+            q_hi = np.quantile(errors, 1 - alpha / 2)
+            lower = pred_values + q_lo
+            upper = pred_values + q_hi
+            inside = (actual >= lower) & (actual <= upper)
+            emp_coverage = np.mean(inside)
+            interval_width = np.mean(upper - lower)
+            calibration_error = abs(emp_coverage - conf)
+
+            records.append({
+                "target": target,
+                "model": model_name,
+                "horizon": horizon,
+                "nominal_confidence": conf,
+                "empirical_coverage": round(emp_coverage, 4),
+                "mean_interval_width": round(interval_width, 2),
+                "calibration_error": round(calibration_error, 4),
+                "n_samples": n,
+            })
+
+    df = pd.DataFrame(records)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        df.to_csv(os.path.join(output_dir, "coverage_calibration.csv"), index=False)
+    return df

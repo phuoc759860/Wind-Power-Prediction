@@ -57,6 +57,25 @@ def _daily_agg(df, date_col, value_cols):
     return df.groupby("_date").agg(agg).reset_index()
 
 
+def _conformal_bounds_for_group(predicted, actual, confidence=0.9, rated=2200):
+    residuals = np.abs(actual - predicted)
+    alpha = 1 - confidence
+    if len(residuals) >= 10:
+        q_lo = np.quantile(residuals, alpha / 2)
+        q_hi = np.quantile(residuals, 1 - alpha / 2)
+        lower = np.maximum(0, predicted + q_lo)
+        upper = np.minimum(rated, predicted + q_hi)
+    else:
+        std = np.std(predicted) if len(predicted) > 1 else predicted.std() if hasattr(predicted, 'std') else 0
+        if pd.isna(std) or std == 0:
+            lower = np.maximum(0, predicted * 0.95)
+            upper = np.minimum(rated, predicted * 1.15)
+        else:
+            lower = np.maximum(0, predicted - 1.96 * std)
+            upper = np.minimum(rated, predicted + 1.96 * std)
+    return lower, upper
+
+
 def generate_power_forecast(test_df, models):
     """Generate power_forecast.csv — daily aggregated per doc section 15 Table 9 Row 1"""
     logger.info("Generating power_forecast.csv (daily avg) ...")
@@ -65,7 +84,7 @@ def generate_power_forecast(test_df, models):
     if ts_col not in test_df.columns:
         ts_col = test_df.columns[0]
 
-    rows = []
+    raw_records = []
     for tb in TURBINES:
         for horizon in HORIZON_NAMES:
             for mdl_name in ["lightgbm", "xgboost"]:
@@ -76,33 +95,44 @@ def generate_power_forecast(test_df, models):
 
                 from src.predict import predict_with_model
                 preds = predict_with_model(models[model_key], test_df)
+                n = len(preds)
+                actuals = test_df[target].values[:n] if target in test_df.columns else np.full(n, np.nan)
 
-                sigma = np.where(preds > 0, preds * 0.08, 50)
-                lowers = np.maximum(0, preds - 1.96 * sigma)
-                uppers = np.minimum(RATED_POWER, preds + 1.96 * sigma)
+                lo, hi = _conformal_bounds_for_group(preds, actuals, confidence=0.9)
 
-                daily = pd.DataFrame({
-                    ts_col: test_df[ts_col].values[:len(preds)],
-                    "y_pred": preds,
-                    "y_low": lowers,
-                    "y_high": uppers,
-                })
-                daily = _daily_agg(daily, ts_col, ["y_pred", "y_low", "y_high"])
-
-                horizon_min = HORIZON_MAP[horizon]
-                forecast_quality = "reference_only" if horizon_min >= 360 else "production"
-                for _, r in daily.iterrows():
-                    rows.append({
-                        "timestamp_issue": str(r["_date"].date()),
-                        "timestamp_target": str(r["_date"].date()),
+                for i in range(n):
+                    raw_records.append({
+                        ts_col: test_df[ts_col].values[i] if i < len(test_df) else pd.NaT,
                         "turbine_id": tb,
-                        "horizon_min": horizon_min,
-                        "y_pred": round(r["y_pred"], 2),
-                        "y_low": round(max(0, r["y_low"]), 2),
-                        "y_high": round(min(RATED_POWER, r["y_high"]), 2),
+                        "horizon_min": HORIZON_MAP[horizon],
                         "model_version": f"{MODEL_VERSION}_{mdl_name}",
-                        "forecast_quality": forecast_quality,
+                        "forecast_quality": "reference_only" if HORIZON_MAP[horizon] >= 360 else "production",
+                        "y_pred": preds[i],
+                        "y_low": lo[i],
+                        "y_high": hi[i],
                     })
+
+    raw = pd.DataFrame(raw_records)
+    raw["_date"] = pd.to_datetime(raw[ts_col]).dt.normalize()
+    daily = raw.groupby(["_date", "turbine_id", "horizon_min", "model_version", "forecast_quality"], dropna=False).agg(
+        y_pred=("y_pred", "mean"),
+        y_low=("y_low", "mean"),
+        y_high=("y_high", "mean"),
+    ).reset_index()
+
+    rows = []
+    for _, r in daily.iterrows():
+        rows.append({
+            "timestamp_issue": str(r["_date"].date()),
+            "timestamp_target": str(r["_date"].date()),
+            "turbine_id": r["turbine_id"],
+            "horizon_min": r["horizon_min"],
+            "y_pred": round(r["y_pred"], 2),
+            "y_low": round(max(0, r["y_low"]), 2),
+            "y_high": round(min(RATED_POWER, r["y_high"]), 2),
+            "model_version": r["model_version"],
+            "forecast_quality": r["forecast_quality"],
+        })
 
     df = pd.DataFrame(rows).sort_values(["timestamp_issue", "turbine_id", "horizon_min", "model_version"]).reset_index(drop=True)
     df.to_csv(OUT / "power_forecast.csv", index=False)
@@ -117,7 +147,7 @@ def generate_farm_forecast(test_df, models):
     if ts_col not in test_df.columns:
         ts_col = test_df.columns[0]
 
-    rows = []
+    raw_records = []
     for horizon in HORIZON_NAMES:
         for mdl_name in ["lightgbm", "xgboost"]:
             target = f"farm_total_power_target_{horizon}"
@@ -127,26 +157,45 @@ def generate_farm_forecast(test_df, models):
 
             from src.predict import predict_with_model
             preds = predict_with_model(models[model_key], test_df)
+            n = len(preds)
+            actuals = test_df[target].values[:n] if target in test_df.columns else np.full(n, np.nan)
+
+            lo, hi = _conformal_bounds_for_group(preds, actuals, confidence=0.9)
             dt_minutes = HORIZON_MAP[horizon]
 
-            daily = pd.DataFrame({
-                ts_col: test_df[ts_col].values[:len(preds)],
-                "farm_power_pred": preds,
-            })
-            daily = _daily_agg(daily, ts_col, ["farm_power_pred"])
-
-            for _, r in daily.iterrows():
-                farm_power = round(r["farm_power_pred"], 2)
-                farm_energy = round(farm_power * dt_minutes / 60.0, 2)
-                forecast_quality = "reference_only" if dt_minutes >= 360 else "production"
-                rows.append({
-                    "timestamp_issue": str(r["_date"].date()),
-                    "timestamp_target": str(r["_date"].date()),
+            for i in range(n):
+                raw_records.append({
+                    ts_col: test_df[ts_col].values[i] if i < len(test_df) else pd.NaT,
                     "horizon_min": dt_minutes,
-                    "farm_power_pred": farm_power,
-                    "farm_energy_pred": farm_energy,
-                    "forecast_quality": forecast_quality,
+                    "model_version": f"{MODEL_VERSION}_{mdl_name}",
+                    "forecast_quality": "reference_only" if dt_minutes >= 360 else "production",
+                    "farm_power_pred": preds[i],
+                    "y_low": lo[i],
+                    "y_high": hi[i],
                 })
+
+    raw = pd.DataFrame(raw_records)
+    raw["_date"] = pd.to_datetime(raw[ts_col]).dt.normalize()
+    daily = raw.groupby(["_date", "horizon_min", "model_version", "forecast_quality"], dropna=False).agg(
+        farm_power_pred=("farm_power_pred", "mean"),
+        y_low=("y_low", "mean"),
+        y_high=("y_high", "mean"),
+    ).reset_index()
+
+    rows = []
+    for _, r in daily.iterrows():
+        farm_power = round(r["farm_power_pred"], 2)
+        farm_energy = round(farm_power * r["horizon_min"] / 60.0, 2)
+        rows.append({
+            "timestamp_issue": str(r["_date"].date()),
+            "timestamp_target": str(r["_date"].date()),
+            "horizon_min": r["horizon_min"],
+            "farm_power_pred": farm_power,
+            "farm_power_low": round(max(0, r["y_low"]), 2),
+            "farm_power_high": round(min(RATED_POWER, r["y_high"]), 2),
+            "farm_energy_pred": farm_energy,
+            "forecast_quality": r["forecast_quality"],
+        })
 
     df = pd.DataFrame(rows).sort_values(["timestamp_issue", "horizon_min"]).reset_index(drop=True)
     df.to_csv(OUT / "farm_forecast.csv", index=False)
@@ -183,6 +232,7 @@ def generate_metrics():
             "nRMSE": round(row.get("nrmse_pct", 0), 4),
             "Bias": round(row.get("bias", 0), 4),
             "R2": round(row.get("r2", 0), 4),
+            "max_error": round(row.get("max_error", 0), 4),
             "skill_score": round(row.get("skill_score", 0), 4),
         })
 
@@ -480,6 +530,8 @@ def generate_figures():
             if not farm_metrics_df.empty:
                 farm_metrics_df.to_csv(OUT / "farm_metrics.csv", index=False)
             generate_metrics()
+            from src.evaluate import evaluate_coverage_calibration
+            evaluate_coverage_calibration(test_df, predictions, config, output_dir=str(OUT))
             logger.info(f"  evaluation_metrics.csv saved ({len(results_df)} rows)")
 
     from src.evaluate import (
@@ -574,6 +626,37 @@ def generate_all():
     generate_anomaly_alert(test_df)
     generate_failure_risk(test_df)
     generate_temperature_warning(test_df)
+    generate_coverage_calibration(test_df, models)
+
+
+def generate_coverage_calibration(test_df, models):
+    """Evaluate coverage probability and calibration of conformal CIs."""
+    logger.info("Generating coverage_calibration.csv ...")
+    config = load_config()
+    predictions = {}
+    for tb in TURBINES:
+        for horizon in HORIZON_NAMES:
+            for mdl_name in ["lightgbm", "xgboost"]:
+                target = f"{tb}_power_target_{horizon}"
+                model_key = f"{target}_{mdl_name}"
+                if model_key in models:
+                    from src.predict import predict_with_model
+                    preds = predict_with_model(models[model_key], test_df)
+                    predictions[model_key] = {"predictions": preds, "model_name": mdl_name, "target": target}
+
+            farm_target = f"farm_total_power_target_{horizon}"
+            farm_key = f"{farm_target}_{mdl_name}"
+            if farm_key in models:
+                from src.predict import predict_with_model
+                preds = predict_with_model(models[farm_key], test_df)
+                predictions[farm_key] = {"predictions": preds, "model_name": mdl_name, "target": farm_target}
+
+    from src.evaluate import evaluate_coverage_calibration
+    df = evaluate_coverage_calibration(test_df, predictions, config, output_dir=str(OUT))
+    if not df.empty:
+        logger.info(f"  coverage_calibration.csv: {df.shape[0]} rows")
+    else:
+        logger.warning("  coverage_calibration.csv: no data")
 
 
 def main():

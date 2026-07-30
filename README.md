@@ -160,21 +160,27 @@ All settings are in `configs/config.yaml`:
 | GET | `/outputs/data-quality` | Data quality report |
 | GET | `/download/{filename}` | Download output CSV files |
 
+## Compliance Matrix
+
+All 16 requirements (4.1–4.16) are mapped to implementation files, tests, and evidence in `configs/compliance_matrix.csv`.
+
 ## Output Files (Doc Section 15 Compliance)
 
 Generated in `outputs/forecasts/`:
 
 | File | Columns | Rows | Description |
 |------|---------|------|-------------|
-| `power_forecast.csv` | timestamp_issue, timestamp_target, turbine_id, horizon_min, y_pred, y_low, y_high, model_version | 5.6M | Per-turbine power forecasts with 95% CI |
-| `farm_forecast.csv` | timestamp_issue, timestamp_target, horizon_min, farm_power_pred, farm_energy_pred | 468K | Aggregated farm power + energy |
-| `metrics.csv` | model, turbine_id, horizon, MAE, nMAE, RMSE, nRMSE, Bias, R2, skill_score | 130 | Model performance metrics |
+| `power_forecast.csv` | timestamp_issue, timestamp_target, turbine_id, horizon_min, y_pred, y_low, y_high, model_version, forecast_quality | 5.6M | Per-turbine power forecasts with conformal CI |
+| `farm_forecast.csv` | timestamp_issue, timestamp_target, horizon_min, farm_power_pred, farm_power_low, farm_power_high, farm_energy_pred, forecast_quality | 468K | Aggregated farm power + energy + CI |
+| `metrics.csv` | model, turbine_id, horizon, MAE, nMAE, RMSE, nRMSE, Bias, R2, max_error, skill_score | 130 | Model performance metrics |
 | `evaluation_metrics.csv` | target, model, horizon, mae, nmae_pct, rmse, nrmse_pct, bias, r2, max_error, skill_score, n_samples | 130 | Detailed evaluation metrics |
-| `farm_metrics.csv` | horizon, model, mae, rmse, nmae_pct, nrmse_pct, bias, r2 | 10 | Farm-level metrics (direct on summed power) |
+| `farm_metrics.csv` | target, model, horizon, mae, rmse, nmae_pct, nrmse_pct, bias, r2, max_error, n_samples, level | 10 | Farm-level metrics (direct on summed power) |
 | `data_quality_report.csv` | column, missing_rate, invalid_count, min, max, unit_status, remarks | 115 | Column-level data quality |
 | `ramp_alert.csv` | timestamp, ramp_type, expected_change, probability, threshold, affected_turbines | 376 | Ramp events detected |
-| `failure_risk.csv` | timestamp, turbine_id, component, horizon, failure_probability, recommended_action | 42K | Turbine failure risk |
+| `failure_risk.csv` | timestamp, turbine_id, component, horizon, stop_risk_score, method, recommended_action | 42K | Turbine stop risk score |
 | `anomaly_alert.csv` | timestamp, turbine_id, anomaly_score, suspected_component, evidence | 0+ | Statistical anomalies (z>3.0) |
+| `temperature_warning.csv` | timestamp, turbine_id, temperature, warning_type, severity, message | 0+ | Temperature threshold alerts |
+| `coverage_calibration.csv` | target, model, horizon, nominal_confidence, empirical_coverage, mean_interval_width, calibration_error, n_samples | 220 | Conformal CI coverage calibration |
 
 ## Testing
 

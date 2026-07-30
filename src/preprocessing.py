@@ -169,15 +169,15 @@ def preprocess_pipeline(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     logger.info("Step 3: Enforcing sampling interval...")
     df = enforce_sampling_interval(df, interval)
 
-    logger.info("Step 4: Handling missing values (max_gap=12 steps = 2 hours)...")
+    logger.info("Step 4: Creating missing flags (before imputation)...")
+    df = create_missing_flags(df)
+
+    logger.info("Step 5: Handling missing values (max_gap=12 steps = 2 hours)...")
     df = handle_missing_values(df, max_gap=12)
 
-    logger.info("Step 5: Computing farm-level aggregates...")
+    logger.info("Step 6: Computing farm-level aggregates...")
     df = compute_farm_total_power(df)
     df = compute_farm_avg_wind(df)
-
-    logger.info("Step 6: Creating missing flags...")
-    df = create_missing_flags(df)
 
     logger.info("Step 7: Detecting operating status...")
     df = detect_operating_status(df)

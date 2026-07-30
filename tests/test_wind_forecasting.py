@@ -255,5 +255,33 @@ class TestNoLookaheadLeakage:
         assert np.isnan(filled.iloc[13]), "Row 13 has gap > 12, should stay NaN"
 
 
+class TestComplianceMatrix:
+    """Doc 4.16: Verify the traceability/compliance matrix exists and covers all 4.x requirements."""
+
+    REQUIRED_IDS = {f"4.{i}" for i in range(1, 17)}
+
+    def test_matrix_file_exists(self):
+        path = Path(__file__).parent.parent / "configs" / "compliance_matrix.csv"
+        assert path.exists(), "compliance_matrix.csv must exist"
+
+    def test_all_requirements_covered(self):
+        path = Path(__file__).parent.parent / "configs" / "compliance_matrix.csv"
+        df = pd.read_csv(path, dtype=str)
+        import re
+        covered = set()
+        for val in df["requirement_id"].dropna():
+            m = re.match(r"(\d+\.\d+)", str(val).strip())
+            if m:
+                covered.add(m.group(1))
+        missing = self.REQUIRED_IDS - covered
+        assert not missing, f"Missing requirements in matrix: {sorted(missing)}"
+
+    def test_each_row_has_status(self):
+        path = Path(__file__).parent.parent / "configs" / "compliance_matrix.csv"
+        df = pd.read_csv(path, dtype=str)
+        invalid = df[df["status"].isna() | (df["status"].str.strip() == "")]
+        assert len(invalid) == 0, f"Requirements missing status: {list(invalid['requirement_id'])}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
