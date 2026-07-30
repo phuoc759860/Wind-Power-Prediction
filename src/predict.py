@@ -46,46 +46,85 @@ def predict_power(test_data: pd.DataFrame, trained_models: Dict,
     return predictions
 
 
+def _parse_target(target: str):
+    """Parse target column name into (turbine_id, horizon)."""
+    if "_target_" not in target:
+        return "unknown", "unknown"
+    base_part, horizon = target.split("_target_", 1)
+    if base_part.endswith("_power"):
+        turbine_id = base_part[:-6]
+    else:
+        turbine_id = base_part
+    return turbine_id, horizon
+
+
 def create_forecast_output(test_data: pd.DataFrame, predictions: Dict,
                            timestamp_col: str = "timestamp") -> pd.DataFrame:
-    columns = {}
+    n = len(test_data)
+    timestamps = test_data[timestamp_col].values[:n] if timestamp_col in test_data.columns else np.arange(n)
 
-    if timestamp_col in test_data.columns:
-        columns["timestamp"] = test_data[timestamp_col].values[:len(test_data)]
-
+    dfs = []
     for model_key, pred_info in predictions.items():
-        pred_values = pred_info["predictions"]
+        pred_values = pred_info["predictions"][:n]
         target = pred_info.get("target", model_key)
         model_name = pred_info.get("model_name", "unknown")
+        turbine_id, horizon = _parse_target(target)
 
-        columns[f"{model_key}_predicted"] = pred_values[:len(test_data)]
-        columns[f"{model_key}_model"] = np.full(len(test_data), model_name, dtype=object)
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "turbine_id": turbine_id,
+            "horizon": horizon,
+            "model": model_name,
+            "predicted": pred_values,
+        })
 
         if target in test_data.columns:
-            actual = test_data[target].values[:len(test_data)]
-            columns[f"{model_key}_actual"] = actual
-            columns[f"{model_key}_error"] = actual - pred_values[:len(test_data)]
+            actual = test_data[target].values[:n]
+            df["actual"] = actual
+            df["error"] = actual - pred_values
 
-    output = pd.DataFrame(columns)
-    return output
+        dfs.append(df)
+
+    result = pd.concat(dfs, ignore_index=True)
+    sort_cols = [c for c in ["timestamp", "turbine_id", "horizon", "model"] if c in result.columns]
+    result = result.sort_values(sort_cols).reset_index(drop=True)
+    return result
 
 
 def add_confidence_intervals(predictions_df: pd.DataFrame, trained_models: Dict,
                              confidence: float = 0.9) -> pd.DataFrame:
     df = predictions_df.copy()
-    z = 1.645 if confidence == 0.9 else 2.576 if confidence == 0.99 else 1.96
+    alpha = 1 - confidence
     rated = 2200
 
-    pred_cols = [c for c in df.columns if c.endswith("_predicted")]
-    new_cols = {}
-    for col in pred_cols:
-        pred = df[col].dropna()
-        if len(pred) > 10:
-            std = pred.std()
-            new_cols[col.replace("_predicted", "_lower_bound")] = (df[col] - z * std).clip(lower=0, upper=rated)
-            new_cols[col.replace("_predicted", "_upper_bound")] = (df[col] + z * std).clip(lower=0, upper=rated)
+    def _conformal_bounds(group):
+        residuals = group["error"].dropna().abs().values if "error" in group.columns else None
+        if residuals is None or len(residuals) < 10:
+            std = group["predicted"].std()
+            if pd.isna(std) or std == 0:
+                lo = group["predicted"] * 0.05
+                hi = group["predicted"] * 0.15
+            else:
+                lo = group["predicted"] - 1.96 * std
+                hi = group["predicted"] + 1.96 * std
+            group["lower_bound"] = lo.clip(lower=0, upper=rated)
+            group["upper_bound"] = hi.clip(lower=0, upper=rated)
+            return group
 
-    df = pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+        q_lo = np.quantile(residuals, alpha / 2)
+        q_hi = np.quantile(residuals, 1 - alpha / 2)
+        group["lower_bound"] = (group["predicted"] + q_lo).clip(lower=0, upper=rated)
+        group["upper_bound"] = (group["predicted"] + q_hi).clip(lower=0, upper=rated)
+        return group
+
+    if "error" in df.columns:
+        df = df.groupby(["turbine_id", "horizon", "model"], group_keys=False).apply(_conformal_bounds)
+    else:
+        grouped = df.groupby(["turbine_id", "horizon", "model"])["predicted"]
+        stds = grouped.transform("std")
+        df["lower_bound"] = (df["predicted"] - 1.96 * stds).clip(lower=0, upper=rated)
+        df["upper_bound"] = (df["predicted"] + 1.96 * stds).clip(lower=0, upper=rated)
+
     return df
 
 

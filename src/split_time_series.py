@@ -32,19 +32,36 @@ def split_by_time(df: pd.DataFrame, timestamp_col: str = "timestamp",
     return train, val, test
 
 
-def get_split_statistics(train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFrame) -> dict:
+def get_split_statistics(train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFrame,
+                         timestamp_col: str = "timestamp", interval_minutes: int = 10) -> dict:
     stats = {}
-    for name, split in [("train", train), ("validation", val), ("test", test)]:
+    all_combined = pd.concat([train, val, test]).sort_values(timestamp_col).reset_index(drop=True)
+
+    for name, split in [("train", train), ("validation", val), ("test", test), ("total", all_combined)]:
+        if timestamp_col not in split.columns:
+            continue
+        ts = pd.to_datetime(split[timestamp_col])
+        start, end = ts.min(), ts.max()
+        expected_steps = int((end - start).total_seconds() / 60 / interval_minutes) + 1
+        actual_steps = len(split)
+        n_duplicates = split.duplicated(subset=[timestamp_col]).sum()
+
         stats[name] = {
-            "rows": len(split),
-            "date_start": str(split["timestamp"].min()) if "timestamp" in split.columns else "N/A",
-            "date_end": str(split["timestamp"].max()) if "timestamp" in split.columns else "N/A",
+            "rows": actual_steps,
+            "timestamp_start": str(start),
+            "timestamp_end": str(end),
+            "expected_steps": expected_steps,
+            "actual_steps": actual_steps,
+            "step_diff": actual_steps - expected_steps,
+            "n_duplicate_timestamps": int(n_duplicates),
+            "n_missing_timestamps": max(0, expected_steps - actual_steps + n_duplicates),
+            "timezone": str(ts.dt.tz) if ts.dt.tz is not None else "None (naive)",
         }
 
         power_cols = [c for c in split.columns if c.endswith("_power") and "target" not in c and "lag" not in c]
         if power_cols:
             stats[name]["avg_power"] = round(split[power_cols].mean().mean(), 2)
-            stats[name]["total_energy_mwh"] = round(split[power_cols].mean().sum() * 10 / 60000, 2)
+            stats[name]["total_energy_mwh"] = round(split[power_cols].mean().sum() * interval_minutes / 60000, 2)
 
     return stats
 

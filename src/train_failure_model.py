@@ -41,22 +41,65 @@ def detect_failure_events(df: pd.DataFrame, power_col: str,
     return df
 
 
+def _classify_states(df: pd.DataFrame, power_col: str) -> pd.DataFrame:
+    df = df.copy()
+    turbine = power_col.replace("_power", "")
+    wind_col = f"{turbine}_wind_speed"
+    status_col = f"{turbine}_status"
+    has_status = status_col in df.columns
+
+    def classify_row(row):
+        p = row[power_col]
+        if pd.isna(p):
+            return "missing/unknown"
+        if p > 5:
+            return "generating"
+        if has_status and row.get(status_col) == "curtailed":
+            return "curtailed"
+        if has_status and row.get(status_col) == "no_data":
+            return "communication_loss"
+        w = row.get(wind_col)
+        if pd.notna(w) and w > 3:
+            return "standby"
+        return "stopped"
+
+    df[f"{turbine}_state"] = df.apply(classify_row, axis=1)
+    return df
+
+
 def compute_availability(df: pd.DataFrame, power_col: str) -> Dict:
     turbine = power_col.replace("_power", "")
-    total = len(df)
-    generating = (df[power_col] > 5).sum()
-    stopped = (df[power_col] <= 5).sum()
-    missing = df[power_col].isnull().sum()
+    df = _classify_states(df, power_col)
+    state_col = f"{turbine}_state"
 
-    availability = generating / (generating + stopped) * 100 if (generating + stopped) > 0 else 0
+    total = len(df)
+    state_counts = df[state_col].value_counts()
+    minutes_per_sample = 10
+
+    generating = state_counts.get("generating", 0)
+    stopped = state_counts.get("stopped", 0)
+    curtailed = state_counts.get("curtailed", 0)
+    standby = state_counts.get("standby", 0)
+    communication_loss = state_counts.get("communication_loss", 0)
+    missing = state_counts.get("missing/unknown", 0)
+
+    observed = generating + stopped + curtailed + standby
+    observed_availability = generating / observed * 100 if observed > 0 else 0
+    calendar_availability = generating / total * 100 if total > 0 else 0
+    data_coverage = observed / total * 100 if total > 0 else 0
 
     return {
         "turbine": turbine,
-        "total_hours": round(total * 10 / 60, 1),
-        "generating_hours": round(generating * 10 / 60, 1),
-        "stopped_hours": round(stopped * 10 / 60, 1),
-        "missing_hours": round(missing * 10 / 60, 1),
-        "availability_pct": round(availability, 2),
+        "total_hours": round(total * minutes_per_sample / 60, 1),
+        "generating_hours": round(generating * minutes_per_sample / 60, 1),
+        "stopped_hours": round(stopped * minutes_per_sample / 60, 1),
+        "curtailed_hours": round(curtailed * minutes_per_sample / 60, 1),
+        "standby_hours": round(standby * minutes_per_sample / 60, 1),
+        "comm_loss_hours": round(communication_loss * minutes_per_sample / 60, 1),
+        "missing_hours": round(missing * minutes_per_sample / 60, 1),
+        "observed_availability_pct": round(observed_availability, 2),
+        "calendar_availability_pct": round(calendar_availability, 2),
+        "data_coverage_pct": round(data_coverage, 2),
     }
 
 

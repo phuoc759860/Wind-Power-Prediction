@@ -21,9 +21,8 @@ def handle_missing_values(df: pd.DataFrame, max_gap: int = 12) -> pd.DataFrame:
         gap_sizes = null_mask.groupby(groups).transform("sum")
 
         short_gap = null_mask & (gap_sizes <= max_gap)
-        df.loc[short_gap, col] = df.loc[short_gap, col].interpolate(
-            method="linear", limit=max_gap, limit_direction="forward"
-        )
+        if short_gap.sum() > 0:
+            df.loc[short_gap, col] = df.loc[short_gap, col].ffill(limit=max_gap)
 
         long_gap = null_mask & (gap_sizes > max_gap)
         if long_gap.sum() > 0:

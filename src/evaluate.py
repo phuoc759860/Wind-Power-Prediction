@@ -264,7 +264,7 @@ def plot_best_model_scatter(results_df: pd.DataFrame, test_data: pd.DataFrame,
         actual_vals = actual_vals[valid]
         pred_vals = pred_vals[valid]
 
-        axes[i].scatter(actual_vals, pred_vals, alpha=0.05, s=3, color=HORIZON_COLORS.get(h, "steelblue"))
+        axes[i].scatter(actual_vals, pred_vals, alpha=0.15, s=1, color=HORIZON_COLORS.get(h, "steelblue"))
         lims = [0, 2200]
         axes[i].plot(lims, lims, "r--", linewidth=1.5, alpha=0.8, label="Perfect")
         axes[i].set_xlim(lims)
@@ -459,44 +459,68 @@ def analyze_tb12(test_data: pd.DataFrame, results_df: pd.DataFrame) -> Dict:
 
     tb12_power_values = tb12_power.values
     tb12_analysis["missing_rate"] = round(np.isnan(tb12_power_values).mean() * 100, 2)
-    tb12_analysis["zero_rate"] = round(((tb12_power_values == 0) | (tb12_power_values < 5)).sum() / len(tb12_power_values) * 100, 2)
+    tb12_analysis["stopped_rate"] = round(((tb12_power_values == 0) | (tb12_power_values < 5)).sum() / len(tb12_power_values) * 100, 2)
     tb12_analysis["mean_power_when_operating"] = round(np.nanmean(tb12_power_values[tb12_power_values > 5]), 2)
 
     frozen = _detect_frozen_data(tb12_power_values)
     tb12_analysis["frozen_data_blocks"] = frozen["count"]
     tb12_analysis["frozen_data_ratio"] = round(frozen["ratio"] * 100, 2)
 
-    for ref_tb in ["TB09", "TB04"]:
+    for ref_tb in [t for t in TURBINE_IDS if t != "TB12"]:
         ref_col = f"{ref_tb}_power"
-        if ref_col in test_data.columns:
-            ref_vals = test_data[ref_col].values
-            valid = ~(np.isnan(tb12_power_values) | np.isnan(ref_vals))
-            if valid.sum() > 10:
-                corr = np.corrcoef(tb12_power_values[valid], ref_vals[valid])[0, 1]
-                tb12_analysis[f"power_corr_with_{ref_tb}"] = round(float(corr), 4)
-                tb12_analysis[f"mean_power_{ref_tb}"] = round(float(np.nanmean(ref_vals)), 1)
+        if ref_col not in test_data.columns:
+            continue
+        ref_vals = test_data[ref_col].values
+        valid = ~(np.isnan(tb12_power_values) | np.isnan(ref_vals))
+        if valid.sum() > 10:
+            corr = np.corrcoef(tb12_power_values[valid], ref_vals[valid])[0, 1]
+            tb12_analysis[f"power_corr_with_{ref_tb}"] = round(float(corr), 4)
+            tb12_analysis[f"mean_power_{ref_tb}"] = round(float(np.nanmean(ref_vals)), 1)
 
     tb12_analysis["mean_power_TB12"] = round(float(np.nanmean(tb12_power_values)), 1)
     tb12_analysis["std_power_TB12"] = round(float(np.nanstd(tb12_power_values[tb12_power_values > 5])), 1)
 
-    if "TB12_wind_speed" in test_data.columns:
-        ws = test_data["TB12_wind_speed"].values
+    ws_col = "TB12_wind_speed"
+    if ws_col in test_data.columns:
+        ws = test_data[ws_col].values
         valid_ws = ~(np.isnan(ws) | np.isnan(tb12_power_values))
         if valid_ws.sum() > 10:
-            tb12_analysis["wind_speed_corr_with_TB12_power"] = round(
+            tb12_analysis["wind_speed_corr_with_power"] = round(
                 float(np.corrcoef(tb12_power_values[valid_ws], ws[valid_ws])[0, 1]), 4)
-            tb12_analysis["mean_wind_speed_TB12"] = round(float(np.nanmean(ws)), 2)
+            tb12_analysis["mean_wind_speed"] = round(float(np.nanmean(ws)), 2)
 
-    if "TB09_wind_speed" in test_data.columns:
-        tb12_analysis["mean_wind_speed_TB09"] = round(float(np.nanmean(test_data["TB09_wind_speed"].values)), 2)
-    if "TB04_wind_speed" in test_data.columns:
-        tb12_analysis["mean_wind_speed_TB04"] = round(float(np.nanmean(test_data["TB04_wind_speed"].values)), 2)
+        if "TB09_wind_speed" in test_data.columns:
+            tb12_analysis["ws_corr_TB12_vs_TB09"] = round(
+                float(np.corrcoef(ws[valid_ws], test_data["TB09_wind_speed"].values[valid_ws])[0, 1]), 4)
+            tb12_analysis["mean_wind_speed_TB09"] = round(float(np.nanmean(test_data["TB09_wind_speed"].values)), 2)
+        if "TB11_wind_speed" in test_data.columns:
+            tb12_analysis["mean_wind_speed_TB11"] = round(float(np.nanmean(test_data["TB11_wind_speed"].values)), 2)
+            tb12_analysis["ws_corr_TB12_vs_TB11"] = round(
+                float(np.corrcoef(ws[valid_ws], test_data["TB11_wind_speed"].values[valid_ws])[0, 1]), 4)
 
     tb12_results = results_df[results_df["target"].str.startswith("TB12")] if not results_df.empty else pd.DataFrame()
     if not tb12_results.empty:
         tb12_analysis["mean_r2"] = round(tb12_results["r2"].mean(), 4)
         for _, row in tb12_results.iterrows():
             tb12_analysis[f"r2_{row['horizon']}_{row['model']}"] = row["r2"]
+
+    findings = []
+    if tb12_analysis.get("missing_rate", 0) > 20:
+        findings.append("HIGH_MISSING: missing rate >20% - possible communication loss")
+    if tb12_analysis.get("frozen_data_ratio", 0) > 10:
+        findings.append("FROZEN_SIGNAL: frozen data ratio >10% - possible sensor drift")
+    if tb12_analysis.get("wind_speed_corr_with_power", 1) < 0.5:
+        findings.append("LOW_WS_POWER_CORR: wind-power correlation <0.5 - power curve deviation")
+    neighbor_corr = [v for k, v in tb12_analysis.items() if k.startswith("power_corr_with_")]
+    if neighbor_corr and np.mean(neighbor_corr) < 0.4:
+        findings.append("LOW_NEIGHBOR_CORR: avg power correlation with neighbors <0.4 - anomalous behavior")
+    if tb12_analysis.get("stopped_rate", 0) > 30:
+        findings.append("HIGH_STOPPED: stopped rate >30% - possible maintenance/fault issue")
+    if tb12_analysis.get("mean_power_TB12", 1000) < 200:
+        findings.append("LOW_MEAN_POWER: mean power <200kW - significantly underperforming")
+    tb12_analysis["findings"] = findings
+    if not findings:
+        tb12_analysis["findings"] = ["NO_ANOMALY_DETECTED: TB12 behavior within expected range"]
 
     return tb12_analysis
 
@@ -961,15 +985,27 @@ def evaluate_alert_accuracy(test_data: pd.DataFrame, predictions: Dict,
         tp = np.sum(pred_events & actual_events)
         fp = np.sum(pred_events & ~actual_events)
         fn = np.sum(~pred_events & actual_events)
+        tn = np.sum(~pred_events & ~actual_events)
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
         far = fp / (fp + tp) if (fp + tp) > 0 else 0
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+        balanced_acc = (recall + specificity) / 2
 
         results[model_name] = {
+            "definition": ("Ramp event = |farm_power_change| > {:.0f}% of rated per 10min. "
+                           "Ground truth computed from actual farm_total_power. "
+                           "TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event").format(ramp_threshold * 100),
+            "threshold_pct": ramp_threshold * 100,
+            "n_actual_events": int(actual_events.sum()),
+            "n_predicted_events": int(pred_events.sum()),
+            "tp": int(tp), "fp": int(fp), "fn": int(fn), "tn": int(tn),
             "precision": round(precision, 4), "recall": round(recall, 4),
             "f1": round(f1, 4), "false_alarm_rate": round(far, 4),
-            "tp": int(tp), "fp": int(fp), "fn": int(fn),
+            "specificity": round(specificity, 4), "fpr": round(fpr, 4),
+            "balanced_accuracy": round(balanced_acc, 4),
         }
 
     return results

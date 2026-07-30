@@ -104,6 +104,36 @@ def main():
         json.dump({k: str(v) for k, v in validation_results.items()}, f, indent=2)
 
     # ============================================================
+    # STEP 3b: Data Audit (timestamp coverage, duplicates, timezone)
+    # ============================================================
+    logger.info("\n" + "=" * 60)
+    logger.info("STEP 3b: DATA AUDIT — TIMESTAMP COVERAGE")
+    logger.info("=" * 60)
+
+    if "timestamp" in mapped_data.columns:
+        ts = pd.to_datetime(mapped_data["timestamp"])
+        logger.info(f"  Timezone: {ts.dt.tz if ts.dt.tz is not None else 'None (naive)'}")
+        logger.info(f"  Range: {ts.min()} to {ts.max()}")
+        logger.info(f"  Total raw timestamps: {len(ts)}")
+        logger.info(f"  Duplicate timestamps: {ts.duplicated().sum()}")
+        expected_steps = int((ts.max() - ts.min()).total_seconds() / 60 / 10) + 1
+        logger.info(f"  Expected (10min interval): {expected_steps}")
+        logger.info(f"  Actual: {len(ts)}")
+
+        audit_data = {
+            "timezone": str(ts.dt.tz) if ts.dt.tz is not None else "None (naive)",
+            "start": str(ts.min()),
+            "end": str(ts.max()),
+            "total_raw_rows": len(ts),
+            "expected_timestamps_10min": expected_steps,
+            "duplicate_timestamps": int(ts.duplicated().sum()),
+            "missing_timestamps_estimate": max(0, expected_steps - len(ts)),
+        }
+        with open(base_dir / "data" / "metadata" / "data_audit.json", "w") as f:
+            json.dump(audit_data, f, indent=2, default=str)
+        logger.info("  Data audit saved to data/metadata/data_audit.json")
+
+    # ============================================================
     # STEP 4: Preprocessing
     # ============================================================
     logger.info("\n" + "=" * 60)
@@ -142,8 +172,13 @@ def main():
         test_ratio=split_cfg.get("test_ratio", 0.15),
     )
 
-    split_stats = get_split_statistics(train_df, val_df, test_df)
-    logger.info(f"Split statistics: {json.dumps(split_stats, indent=2, default=str)}")
+    split_stats = get_split_statistics(train_df, val_df, test_df, interval_minutes=10)
+    logger.info("Split statistics (detailed):")
+    for split_name, s in split_stats.items():
+        logger.info(f"  {split_name:12s}: {s['rows']:7d} rows  {s.get('timestamp_start',''):s} to {s.get('timestamp_end',''):s}")
+        if "expected_steps" in s:
+            logger.info(f"  {'':12s}  expected={s['expected_steps']}, actual={s['actual_steps']}, "
+                        f"diff={s['step_diff']:+d}, dups={s['n_duplicate_timestamps']}, missing={s['n_missing_timestamps']}")
 
     power_cols = [c for c in train_df.columns if c.endswith("_power")
                   and "target" not in c and "lag" not in c and "roll" not in c
@@ -160,6 +195,28 @@ def main():
         logger.info(f"  {v['model']:12s} {v['horizon']:6s}: RMSE={v['rmse_mean']:.1f} +/- {v['rmse_std']:.1f}  R2={v['r2_mean']:.4f} +/- {v['r2_std']:.4f}  (n={v['n_folds']})")
     with open(base_dir / "data" / "metadata" / "walk_forward_summary.json", "w") as f:
         json.dump(wf_summary, f, indent=2, default=str)
+
+    # Walk-forward validation for ML models (sample: 2 turbines x 2 horizons for speed)
+    logger.info("\n" + "-" * 50)
+    logger.info("WALK-FORWARD VALIDATION (ML MODELS - SAMPLE)")
+    logger.info("-" * 50)
+    from src.train_power_model import walk_forward_ml as wf_ml
+    ml_wf_results = []
+    sample_targets = ["TB01_power_target_10min", "TB01_power_target_1hour",
+                      "farm_total_power_target_10min", "farm_total_power_target_1hour"]
+    for tgt in sample_targets:
+        if tgt in feature_data.columns:
+            folds = wf_ml(feature_data, tgt, config, n_folds=3)
+            ml_wf_results.extend(folds)
+
+    if ml_wf_results:
+        wf_df = pd.DataFrame(ml_wf_results)
+        for (mdl, hrz), grp in wf_df.groupby(["model", "target"]):
+            h_name = hrz.replace("_power_target_", "_").split("_")[-1] if "_power_target_" in hrz else hrz
+            logger.info(f"  {mdl:12s} {h_name:6s}: n_folds={len(grp)}, "
+                        f"RMSE={grp['rmse'].mean():.1f} +/- {grp['rmse'].std():.1f}")
+        wf_df.to_csv(base_dir / "data" / "metadata" / "walk_forward_ml.csv", index=False)
+        logger.info(f"  ML walk-forward results saved ({len(ml_wf_results)} rows)")
 
     # ============================================================
     # STEP 7: Train Baselines
@@ -306,7 +363,14 @@ def main():
 
     plot_tb12_distribution(test_df, str(fig_dir / "14_tb12_distribution.png"))
 
-    logger.info(f"7 summary visualizations saved to {fig_dir}")
+    logger.info(f"Summary visualizations saved to {fig_dir}")
+
+    from generate_outputs import generate_figures
+    try:
+        generate_figures()
+        logger.info("Additional evaluation figures generated")
+    except Exception as e:
+        logger.warning(f"Could not generate additional figures: {e}")
 
     # ============================================================
     # STEP 14: Generate all doc Section 15 output files
@@ -363,7 +427,7 @@ def main():
         for k, v in sorted(wf_summary.items()):
             logger.info(f"  {v['model']:12s} {v['horizon']:6s}: RMSE={v['rmse_mean']:.1f}±{v['rmse_std']:.1f}")
 
-        results_df.to_csv(base_dir / "outputs" / "forecasts" / "evaluation_metrics.csv", index=False)
+        logger.info("(evaluation_metrics.csv written by generate_metrics() in STEP 14)")
 
     return results_df, forecast_df
 

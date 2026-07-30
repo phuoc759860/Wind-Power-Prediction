@@ -92,7 +92,8 @@ def generate_power_forecast(test_df, models):
                 horizon_min = HORIZON_MAP[horizon]
                 for _, r in daily.iterrows():
                     rows.append({
-                        "forecast_date": str(r["_date"].date()),
+                        "timestamp_issue": str(r["_date"].date()),
+                        "timestamp_target": str(r["_date"].date()),
                         "turbine_id": tb,
                         "horizon_min": horizon_min,
                         "y_pred": round(r["y_pred"], 2),
@@ -101,7 +102,7 @@ def generate_power_forecast(test_df, models):
                         "model_version": f"{MODEL_VERSION}_{mdl_name}",
                     })
 
-    df = pd.DataFrame(rows).sort_values(["forecast_date", "turbine_id", "horizon_min", "model_version"]).reset_index(drop=True)
+    df = pd.DataFrame(rows).sort_values(["timestamp_issue", "turbine_id", "horizon_min", "model_version"]).reset_index(drop=True)
     df.to_csv(OUT / "power_forecast.csv", index=False)
     logger.info(f"  power_forecast.csv: {df.shape[0]} rows (daily)")
 
@@ -136,13 +137,14 @@ def generate_farm_forecast(test_df, models):
                 farm_power = round(r["farm_power_pred"], 2)
                 farm_energy = round(farm_power * dt_minutes / 60.0, 2)
                 rows.append({
-                    "forecast_date": str(r["_date"].date()),
+                    "timestamp_issue": str(r["_date"].date()),
+                    "timestamp_target": str(r["_date"].date()),
                     "horizon_min": dt_minutes,
                     "farm_power_pred": farm_power,
                     "farm_energy_pred": farm_energy,
                 })
 
-    df = pd.DataFrame(rows).sort_values(["forecast_date", "horizon_min"]).reset_index(drop=True)
+    df = pd.DataFrame(rows).sort_values(["timestamp_issue", "horizon_min"]).reset_index(drop=True)
     df.to_csv(OUT / "farm_forecast.csv", index=False)
     logger.info(f"  farm_forecast.csv: {df.shape[0]} rows (daily)")
 
@@ -191,36 +193,50 @@ def generate_data_quality_report():
 
     processed = pd.read_parquet(BASE / "data" / "processed" / "processed_data.parquet")
 
+    physical_cols = []
+    for tb in TURBINES:
+        for suffix in ["_power", "_wind_speed", "_temperature", "_frequency"]:
+            col = f"{tb}{suffix}"
+            if col in processed.columns:
+                physical_cols.append(col)
+
+    physical_cols = [c for c in physical_cols if "target" not in c and "lag" not in c
+                     and "roll" not in c and "diff" not in c and "ramp" not in c]
+
+    unit_map = {"_power": "kW", "_wind_speed": "m/s", "_temperature": "degC", "_frequency": "Hz"}
+
     records = []
-    for col in processed.columns:
+    for col in physical_cols:
         s = processed[col]
         total = len(s)
         missing = int(s.isna().sum())
         missing_rate = round(missing / total * 100, 2) if total > 0 else 0
 
-        if pd.api.types.is_numeric_dtype(s):
-            valid = s.dropna()
-            invalid = int(((valid < -1000) | (valid > 100000)).sum()) if len(valid) > 0 else 0
-            min_val = round(float(valid.min()), 4) if len(valid) > 0 else ""
-            max_val = round(float(valid.max()), 4) if len(valid) > 0 else ""
-            if "power" in col.lower():
-                unit = "kW"
-            elif "wind" in col.lower() and "speed" in col.lower():
-                unit = "m/s"
-            elif "temp" in col.lower():
-                unit = "degC"
-            elif "freq" in col.lower():
-                unit = "Hz"
-            else:
-                unit = "check"
-        else:
-            invalid = 0
-            min_val = ""
-            max_val = ""
-            unit = "text"
+        valid = s.dropna()
+        invalid = 0
+        if len(valid) > 0:
+            if "_power" in col:
+                invalid = int(((valid < 0) | (valid > 2200)).sum())
+            elif "_wind_speed" in col:
+                invalid = int(((valid < 0) | (valid > 60)).sum())
+            elif "_temperature" in col:
+                invalid = int(((valid < -10) | (valid > 55)).sum())
+            elif "_frequency" in col:
+                invalid = int(((valid < 47) | (valid > 53)).sum())
+
+        min_val = round(float(valid.min()), 2) if len(valid) > 0 else ""
+        max_val = round(float(valid.max()), 2) if len(valid) > 0 else ""
+
+        unit = "check"
+        for k, v in unit_map.items():
+            if k in col:
+                unit = v
+                break
 
         if missing_rate > 50:
             remarks = "High missing rate - investigate"
+        elif missing_rate > 20:
+            remarks = "Significant missing data"
         elif missing_rate > 10:
             remarks = "Moderate missing data"
         elif missing_rate > 0:
@@ -230,17 +246,17 @@ def generate_data_quality_report():
 
         records.append({
             "column": col,
-            "missing_rate": missing_rate,
-            "invalid_count": invalid,
+            "missing_rate_pct": missing_rate,
+            "invalid_values": invalid,
             "min": min_val,
             "max": max_val,
-            "unit_status": unit,
+            "unit": unit,
             "remarks": remarks,
         })
 
     out = pd.DataFrame(records)
     out.to_csv(OUT / "data_quality_report.csv", index=False)
-    logger.info(f"  data_quality_report.csv: {out.shape[0]} columns")
+    logger.info(f"  data_quality_report.csv: {out.shape[0]} physical columns")
 
 
 def generate_ramp_alert(test_df):

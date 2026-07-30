@@ -206,6 +206,141 @@ def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
     return results, trained_models
 
 
+def _tune_xgboost(X_train, y_train, X_val, y_val, feature_cols, config):
+    from sklearn.model_selection import TimeSeriesSplit
+    import xgboost as xgb
+
+    tscv = TimeSeriesSplit(n_splits=3)
+    base_params = {
+        "objective": "reg:squarederror",
+        "random_state": config.get("training", {}).get("random_state", 42),
+    }
+
+    param_grid = {
+        "n_estimators": [100, 150, 200],
+        "max_depth": [4, 6, 8],
+        "learning_rate": [0.05, 0.1, 0.15],
+        "subsample": [0.7, 0.8, 1.0],
+        "colsample_bytree": [0.5, 0.7, 1.0],
+    }
+
+    best_score = float("inf")
+    best_params = None
+    for n_est in param_grid["n_estimators"]:
+        for md in param_grid["max_depth"][:2]:
+            for lr in param_grid["learning_rate"][:2]:
+                params = {**base_params, "n_estimators": n_est, "max_depth": md, "learning_rate": lr}
+                scores = []
+                for train_idx, val_idx in tscv.split(X_train):
+                    X_tr_fold, X_val_fold = X_train[train_idx], X_train[val_idx]
+                    y_tr_fold, y_val_fold = y_train[train_idx], y_train[val_idx]
+                    model = xgb.XGBRegressor(**params)
+                    model.fit(X_tr_fold, y_tr_fold)
+                    pred = model.predict(X_val_fold)
+                    scores.append(np.sqrt(np.mean((y_val_fold - pred) ** 2)))
+                mean_rmse = np.mean(scores)
+                if mean_rmse < best_score:
+                    best_score = mean_rmse
+                    best_params = params
+
+    model = xgb.XGBRegressor(**best_params)
+    model.fit(np.vstack([X_train, X_val]), np.concatenate([y_train, y_val]))
+    return model
+
+
+def _tune_lightgbm(X_train, y_train, X_val, y_val, feature_cols, config):
+    from sklearn.model_selection import TimeSeriesSplit
+    import lightgbm as lgb
+
+    tscv = TimeSeriesSplit(n_splits=3)
+    base_params = {
+        "objective": "regression",
+        "random_state": config.get("training", {}).get("random_state", 42),
+        "verbose": -1,
+    }
+
+    param_grid = {
+        "n_estimators": [100, 150, 200],
+        "max_depth": [4, 6, 8],
+        "learning_rate": [0.05, 0.1, 0.15],
+        "subsample": [0.7, 0.8, 1.0],
+        "feature_fraction": [0.5, 0.7, 1.0],
+    }
+
+    best_score = float("inf")
+    best_params = None
+    for n_est in param_grid["n_estimators"]:
+        for md in param_grid["max_depth"][:2]:
+            for lr in param_grid["learning_rate"][:2]:
+                params = {**base_params, "n_estimators": n_est, "max_depth": md, "learning_rate": lr}
+                scores = []
+                for train_idx, val_idx in tscv.split(X_train):
+                    X_tr_fold, X_val_fold = X_train[train_idx], X_train[val_idx]
+                    y_tr_fold, y_val_fold = y_train[train_idx], y_train[val_idx]
+                    model = lgb.LGBMRegressor(**params)
+                    model.fit(X_tr_fold, y_tr_fold)
+                    pred = model.predict(X_val_fold)
+                    scores.append(np.sqrt(np.mean((y_val_fold - pred) ** 2)))
+                mean_rmse = np.mean(scores)
+                if mean_rmse < best_score:
+                    best_score = mean_rmse
+                    best_params = params
+
+    model = lgb.LGBMRegressor(**best_params)
+    model.fit(np.vstack([X_train, X_val]), np.concatenate([y_train, y_val]))
+    return model
+
+
+def walk_forward_ml(df: pd.DataFrame, target_col: str, config: dict,
+                    n_folds: int = 5) -> List[Dict]:
+    from src.split_time_series import walk_forward_split
+
+    folds = walk_forward_split(df, n_folds=n_folds)
+    fold_results = []
+
+    for fold_info in folds:
+        train_fold = fold_info["train"].reset_index(drop=True)
+        val_fold = fold_info["val"]
+
+        X_train, y_train, feature_cols = prepare_features(train_fold, target_col)
+        X_val, y_val, _ = prepare_features(val_fold, target_col, feature_cols)
+
+        if len(X_train) == 0 or len(X_val) == 0:
+            continue
+
+        scaler, X_train_s, X_val_s, _ = scale_features(X_train, X_val)
+        y_train_vals = y_train.values
+        y_val_vals = y_val.values
+
+        models_cfg = config.get("training", {}).get("models", {})
+        ml_models = models_cfg.get("ml", ["xgboost", "lightgbm"])
+
+        for model_name in ml_models:
+            if model_name == "xgboost" and HAS_XGB:
+                model = _tune_xgboost(X_train_s, y_train_vals, X_val_s, y_val_vals, feature_cols, config)
+            elif model_name == "lightgbm" and HAS_LGBM:
+                model = _tune_lightgbm(X_train_s, y_train_vals, X_val_s, y_val_vals, feature_cols, config)
+            else:
+                continue
+
+            val_pred = model.predict(X_val_s)
+            mae = float(np.mean(np.abs(y_val_vals - val_pred)))
+            rmse = float(np.sqrt(np.mean((y_val_vals - val_pred) ** 2)))
+            r2 = float(1 - np.sum((y_val_vals - val_pred) ** 2) / max(np.sum((y_val_vals - np.mean(y_val_vals)) ** 2), 1e-10))
+
+            fold_results.append({
+                "fold": fold_info["fold"],
+                "model": model_name,
+                "target": target_col,
+                "mae": round(mae, 4),
+                "rmse": round(rmse, 4),
+                "r2": round(r2, 4),
+                "n_val": len(y_val_vals),
+            })
+
+    return fold_results
+
+
 def save_models(trained_models: Dict, output_dir: str):
     import joblib
     os.makedirs(output_dir, exist_ok=True)
