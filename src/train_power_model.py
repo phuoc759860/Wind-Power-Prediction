@@ -490,15 +490,24 @@ def load_models(model_dir: str) -> Dict:
 
     for fname in os.listdir(model_dir):
         if fname.endswith("_model.joblib"):
-            target = fname.replace("_model.joblib", "")
+            model_key = fname.replace("_model.joblib", "")
             model = joblib.load(os.path.join(model_dir, fname))
-            scaler_path = os.path.join(model_dir, f"{target}_scaler.joblib")
-            features_path = os.path.join(model_dir, f"{target}_features.json")
+            scaler_path = os.path.join(model_dir, f"{model_key}_scaler.joblib")
+            features_path = os.path.join(model_dir, f"{model_key}_features.json")
 
             scaler = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
             features = json.load(open(features_path)) if os.path.exists(features_path) else []
 
-            loaded[target] = {"model": model, "scaler": scaler, "feature_cols": features}
+            # Saved keys are "<target>_<model_name>"; recover the actual target
+            # column so loaded models behave like the in-memory trained ones.
+            target_col = model_key
+            for suffix in ("_random_forest", "_xgboost", "_lightgbm"):
+                if model_key.endswith(suffix):
+                    target_col = model_key[: -len(suffix)]
+                    break
+
+            loaded[model_key] = {"model": model, "scaler": scaler,
+                                 "feature_cols": features, "target": target_col}
 
     logger.info(f"Loaded {len(loaded)} models from {model_dir}")
     return loaded

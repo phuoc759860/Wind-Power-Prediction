@@ -16,7 +16,7 @@
 | 4.12 | Confidence Intervals (Conformal) | **Implemented** | Residual-quantile per-group CI; coverage calibration evaluated |
 | 4.13 | Alert Accuracy Evaluation | **Implemented** | `evaluate_alert_accuracy()` / `evaluate_anomaly_detection()` → CSV + API |
 | 4.14 | TB12 Turbine Analysis | **Implemented** | neighbor correlation, wind-speed comparison, stopped rate, frozen data detection |
-| 4.15 | Output File Consistency | **Implemented** | 13 CSVs with consistent schema; download whitelist |
+| 4.15 | Output File Consistency | **Implemented** | CSVs with consistent schema; download whitelist |
 | 4.16 | Compliance / Traceability Matrix | **Implemented** | Maps all 16 requirements to files, tests, evidence |
 | 5.1 | NWP (Numerical Weather Prediction) Integration | **Planned** | Would improve 6h+ horizon accuracy; requires external NWP data feed |
 | 5.2 | Drift Detection & Auto-Retraining | **Planned** | Monitor prediction error drift; trigger retraining when degradation detected |

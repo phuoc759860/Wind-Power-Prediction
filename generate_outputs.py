@@ -27,7 +27,7 @@ def load_config():
         return yaml.safe_load(f)
 
 
-def get_test_data():
+def _get_split_dfs():
     processed = pd.read_parquet(BASE / "data" / "processed" / "processed_data.parquet")
     config = load_config()
     from src.feature_engineering import build_feature_matrix, create_target_columns
@@ -37,13 +37,22 @@ def get_test_data():
     horizons = config.get("forecasting", {}).get("horizons", [])
     feature_data = create_target_columns(feature_data, horizons)
     split_cfg = config.get("training", {}).get("split", {})
-    _, _, test_df = split_by_time(
+    return split_by_time(
         feature_data,
         train_ratio=split_cfg.get("train_ratio", 0.7),
         val_ratio=split_cfg.get("validation_ratio", 0.15),
         test_ratio=split_cfg.get("test_ratio", 0.15),
     )
+
+
+def get_test_data():
+    _, _, test_df = _get_split_dfs()
     return test_df
+
+
+def get_val_data():
+    _, val_df, _ = _get_split_dfs()
+    return val_df
 
 
 def load_models():
@@ -543,19 +552,22 @@ def generate_figures():
                         from src.predict import predict_with_model
                         preds = predict_with_model(models[model_key], test_df)
                         predictions[model_key] = {"predictions": preds, "model_name": mdl_name, "target": target}
-                farm_target = f"farm_total_power_target_{horizon}"
-                farm_key = f"{farm_target}_{mdl_name}"
-                if farm_key in models:
-                    from src.predict import predict_with_model
-                    preds = predict_with_model(models[farm_key], test_df)
-                    predictions[farm_key] = {"predictions": preds, "model_name": mdl_name, "target": farm_target}
+
+                    farm_target = f"farm_total_power_target_{horizon}"
+                    farm_key = f"{farm_target}_{mdl_name}"
+                    if farm_key in models:
+                        from src.predict import predict_with_model
+                        preds = predict_with_model(models[farm_key], test_df)
+                        predictions[farm_key] = {"predictions": preds, "model_name": mdl_name, "target": farm_target}
     else:
         logger.info("  evaluation_metrics.csv not found, running evaluation ...")
         test_df = get_test_data()
         models = load_models()
 
-        from src.evaluate import evaluate_all_models, compute_farm_level_metrics
-        from src.predict import predict_power
+        from src.evaluate import (evaluate_all_models, compute_farm_level_metrics,
+                                  fit_farm_bias_correction, apply_farm_bias_correction,
+                                  farm_horizon_window_check)
+        from src.predict import predict_power, predict_with_model
         config = load_config()
 
         predictions = {}
@@ -565,23 +577,29 @@ def generate_figures():
                     target = f"{tb}_power_target_{horizon}"
                     model_key = f"{target}_{mdl_name}"
                     if model_key in models:
-                        from src.predict import predict_with_model
                         preds = predict_with_model(models[model_key], test_df)
                         predictions[model_key] = {"predictions": preds, "model_name": mdl_name, "target": target}
 
-                farm_target = f"farm_total_power_target_{horizon}"
-                farm_key = f"{farm_target}_{mdl_name}"
-                if farm_key in models:
-                    from src.predict import predict_with_model
-                    preds = predict_with_model(models[farm_key], test_df)
-                    predictions[farm_key] = {"predictions": preds, "model_name": mdl_name, "target": farm_target}
+                    farm_target = f"farm_total_power_target_{horizon}"
+                    farm_key = f"{farm_target}_{mdl_name}"
+                    if farm_key in models:
+                        preds = predict_with_model(models[farm_key], test_df)
+                        predictions[farm_key] = {"predictions": preds, "model_name": mdl_name, "target": farm_target}
 
-        results_df = evaluate_all_models(test_df, predictions, {}, config)
+        results_df = evaluate_all_models(test_df, predictions, config)
         if not results_df.empty:
             results_df.to_csv(OUT / "evaluation_metrics.csv", index=False)
-            farm_metrics_df = compute_farm_level_metrics(test_df, predictions, config)
+            val_df = get_val_data()
+            val_predictions = predict_power(val_df, models, config)
+            farm_bias_params = fit_farm_bias_correction(val_df, val_predictions, config)
+            corrected_test_preds = apply_farm_bias_correction(predictions, farm_bias_params)
+            farm_metrics_df = compute_farm_level_metrics(test_df, predictions, config,
+                                                         corrected_predictions=corrected_test_preds)
             if not farm_metrics_df.empty:
                 farm_metrics_df.to_csv(OUT / "farm_metrics.csv", index=False)
+            farm_window_df = farm_horizon_window_check(test_df, predictions, config)
+            if not farm_window_df.empty:
+                farm_window_df.to_csv(OUT / "farm_horizon_window_check.csv", index=False)
             generate_metrics()
             from src.evaluate import evaluate_coverage_calibration
             evaluate_coverage_calibration(test_df, predictions, config, output_dir=str(OUT))

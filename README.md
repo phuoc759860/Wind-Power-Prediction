@@ -174,7 +174,9 @@ Generated in `outputs/forecasts/`:
 | `farm_forecast.csv` | timestamp_issue, timestamp_target, horizon_min, farm_power_pred, farm_power_low, farm_power_high, farm_energy_pred, forecast_quality | 468K | Aggregated farm power + energy + CI |
 | `metrics.csv` | model, turbine_id, horizon, MAE, nMAE, RMSE, nRMSE, Bias, R2, max_error, skill_score | 130 | Model performance metrics |
 | `evaluation_metrics.csv` | target, model, horizon, mae, nmae_pct, rmse, nrmse_pct, bias, r2, max_error, skill_score, n_samples | 130 | Detailed evaluation metrics |
-| `farm_metrics.csv` | target, model, horizon, mae, rmse, nmae_pct, nrmse_pct, bias, r2, max_error, n_samples, level | 10 | Farm-level metrics (direct on summed power) |
+| `farm_metrics.csv` | target, model, horizon, mae, rmse, nmae_pct, nrmse_pct, bias, r2, max_error, n_samples, n_at_capacity, n_zero_power, mae_corrected, rmse_corrected, bias_corrected, r2_corrected, correction_kind, correction_slope, correction_intercept, correction_scalar_kw | 10 | Farm-level metrics: raw vs bias-corrected (P1-04), scored on P(t+h) target |
+| `farm_bias.csv` | horizon, n_samples, actual_mean_kw, farm_model_mean_kw, bias_kw, bias_pct_rated, mae_kw, farm_vs_sum_turbines_kw | 5 | Farm direct-model vs sum-of-turbines bias (P1-04) |
+| `farm_horizon_window_check.csv` | horizon_a, horizon_b, n_common_samples, window_identical, window_start, window_end, r2_a_on_common, r2_b_on_common, r2_b_minus_a_on_common, n_at_capacity_a_common, n_at_capacity_b_common, n_zero_power_a_common, n_zero_power_b_common | 20 | Same-window/mask horizon R2 comparison (P1-04) |
 | `data_quality_report.csv` | column, missing_rate_pct, invalid_values, min, max, unit, remarks, definition, data_source | 48+ | Column-level data quality with formula and source documented |
 | `ramp_alert.csv` | timestamp, ramp_type, expected_change, probability, threshold, affected_turbines | 376 | Ramp events detected |
 | `failure_risk.csv` | timestamp, turbine_id, component, horizon, stop_risk_score, method, recommended_action | 42K | Turbine stop risk score |

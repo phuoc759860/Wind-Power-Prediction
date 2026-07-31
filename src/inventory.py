@@ -47,13 +47,35 @@ def _csv_rows(p: Path):
 
 
 def _count_api_endpoints(base_dir: Path) -> dict:
-    api_file = base_dir / "src" / "api.py"
-    counts = {}
-    if api_file.exists():
-        text = api_file.read_text(encoding="utf-8", errors="ignore")
-        for method in ["get", "post", "put", "delete"]:
-            counts[method.upper()] = len(
-                [1 for line in text.splitlines() if line.strip().startswith(f"@app.{method}(")])
+    """Count live API endpoints straight from app.routes (reviewer P1-01).
+
+    Reads the FastAPI application object at runtime instead of grepping
+    '@app.<method>(' decorators out of the source text, so it stays correct
+    under route prefixes / routers / renamed decorators and matches the
+    reviewer's "đọc trực tiếp app.routes" requirement.
+    """
+    method_counts = {"GET": 0, "POST": 0, "PUT": 0, "DELETE": 0}
+    try:
+        from src.api import app
+        from fastapi.routing import APIRoute
+    except Exception as e:  # pragma: no cover - environment-dependent
+        logger.warning(f"Could not import app to count API endpoints: {e}")
+        return {**dict(method_counts), "total": 0}
+
+    # FastAPI auto-registers /openapi.json, /docs, /docs/oauth2-redirect and
+    # /redoc; they are starlette Route objects today, but filter by path too so
+    # the count stays limited to authored endpoints in any FastAPI version.
+    auto_doc_paths = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if route.path in auto_doc_paths:
+            continue
+        for method in (route.methods or set()):
+            up = method.upper()
+            if up in method_counts:
+                method_counts[up] += 1
+    counts = dict(method_counts)
     counts["total"] = sum(counts.values())
     return counts
 

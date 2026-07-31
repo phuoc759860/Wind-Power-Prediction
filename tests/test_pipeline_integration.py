@@ -37,6 +37,8 @@ EXPECTED_CSVS = [
     "alert_accuracy.csv",
     "anomaly_accuracy.csv",
     "farm_metrics.csv",
+    "farm_bias.csv",
+    "farm_horizon_window_check.csv",
 ]
 
 
@@ -116,3 +118,35 @@ def test_coverage_calibration_schema(csv_cache):
         pytest.skip()
     for col in ["target", "model", "nominal_confidence", "empirical_coverage", "calibration_error"]:
         assert col in df.columns
+
+
+def test_farm_metrics_schema(csv_cache):
+    df = csv_cache.get("farm_metrics.csv")
+    if df is None:
+        pytest.skip()
+    for col in ["target", "model", "horizon", "mae", "rmse", "r2", "bias", "n_samples"]:
+        assert col in df.columns
+    if "r2_corrected" in df.columns:
+        assert df["r2_corrected"].isna().sum() == 0
+    else:
+        pytest.fail("farm_metrics.csv missing bias-corrected columns (P1-04)")
+
+
+def test_farm_bias_schema(csv_cache):
+    df = csv_cache.get("farm_bias.csv")
+    if df is None:
+        pytest.skip()
+    for col in ["horizon", "n_samples", "bias_kw", "bias_pct_rated", "mae_kw"]:
+        assert col in df.columns
+
+
+def test_farm_horizon_window_check_schema(csv_cache):
+    df = csv_cache.get("farm_horizon_window_check.csv")
+    if df is None:
+        pytest.skip()
+    for col in ["horizon_a", "horizon_b", "n_common_samples", "window_identical",
+                "r2_a_on_common", "r2_b_on_common", "r2_b_minus_a_on_common"]:
+        assert col in df.columns
+    pair = df[df["horizon_b"] == "24hour"]
+    if not pair.empty:
+        assert pair["window_identical"].all(), "6h/24h comparison must use identical sample windows"

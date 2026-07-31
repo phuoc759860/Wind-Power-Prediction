@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import threading
 import time
 import hashlib
 import joblib
@@ -43,6 +44,16 @@ HORIZON_MINUTES = {"10min": 10, "30min": 30, "1hour": 60, "6hour": 360, "24hour"
 MODEL_TYPES = ["lightgbm", "xgboost"]
 RATED_POWER = 2200
 MODEL_VERSION = "2.0.0"
+
+# ── Model loading (P2-01): no unbounded cold-load tail.
+#  - PREWARM_MODELS: "all" pre-warms every registry model in a background
+#    thread at startup; an integer N pre-warms the top-N (farm + lightgbm
+#    first); "0"/"none" disables pre-warming.
+#  - MODEL_LOAD_TIMEOUT: if an individual model still fails to load within this
+#    many seconds the request returns 503 instead of hanging (pre-warm plus the
+#    per-key lock below make this fallback path rare).
+PREWARM_MODELS = os.environ.get("PREWARM_MODELS", "all").strip().lower()
+MODEL_LOAD_TIMEOUT = float(os.environ.get("MODEL_LOAD_TIMEOUT", "30"))
 
 # ── Auth (P2-01): the key is provided ONLY via the API_KEY environment
 # variable. There is no default key and no api_key.txt fallback: if it is
@@ -125,6 +136,18 @@ _model_cache: Dict[str, dict] = {}      # key -> {model, scaler, feature_cols} (
 _availability: Dict[str, dict] = {}
 _residual_quantiles: Dict[str, dict] = {}
 _ram_benchmark: dict = {}
+# P2-01: one lock per model key so concurrent cold requests cannot double-load
+# the same artifact (thundering herd -> memory/IO pressure -> multi-second tails).
+_model_load_locks: Dict[str, threading.Lock] = {}
+_model_load_locks_guard = threading.Lock()
+_prewarm_state = {
+    "configured": PREWARM_MODELS,
+    "in_progress": False,
+    "target": 0,
+    "done": 0,
+    "started_at": None,
+    "finished_at": None,
+}
 
 def _scan_model_registry():
     global _model_registry
@@ -160,24 +183,84 @@ def _get_model(key: str) -> dict:
     if key not in _model_registry:
         raise HTTPException(404, f"Model '{key}' not found in registry")
 
-    t0 = time.time()
-    model_path = MODELS_DIR / f"{key}_model.joblib"
-    scaler_path = MODELS_DIR / f"{key}_scaler.joblib"
+    with _model_load_locks_guard:
+        lock = _model_load_locks.setdefault(key, threading.Lock())
 
-    model = joblib.load(str(model_path))
-    scaler = joblib.load(str(scaler_path)) if scaler_path.exists() else None
+    with lock:
+        # Re-check under the lock: a concurrent caller may have loaded it.
+        if key in _model_cache:
+            return _model_cache[key]
 
-    load_time = time.time() - t0
-    _ram_benchmark[key] = {"load_time_ms": round(load_time * 1000, 1)}
-    logger.info(f"Lazy-loaded model '{key}' in {load_time*1000:.0f}ms")
+        t0 = time.time()
+        try:
+            model_path = MODELS_DIR / f"{key}_model.joblib"
+            scaler_path = MODELS_DIR / f"{key}_scaler.joblib"
+            model = joblib.load(str(model_path))
+            scaler = joblib.load(str(scaler_path)) if scaler_path.exists() else None
+        except Exception as e:
+            logger.error(f"Failed to load model '{key}': {e}")
+            raise HTTPException(503, f"Model '{key}' failed to load")
 
-    info = {
-        "model": model,
-        "scaler": scaler,
-        "feature_cols": _model_registry[key].get("feature_cols", []),
-    }
-    _model_cache[key] = info
-    return info
+        load_time = time.time() - t0
+        _ram_benchmark[key] = {"load_time_ms": round(load_time * 1000, 1)}
+        if load_time > MODEL_LOAD_TIMEOUT:
+            logger.error(f"Model '{key}' took {load_time*1000:.0f}ms to load "
+                         f"(timeout {MODEL_LOAD_TIMEOUT}s) -> 503")
+            raise HTTPException(
+                503, f"Model '{key}' load exceeded MODEL_LOAD_TIMEOUT "
+                     f"({MODEL_LOAD_TIMEOUT:.0f}s)")
+        logger.info(f"Lazy-loaded model '{key}' in {load_time*1000:.0f}ms")
+
+        info = {
+            "model": model,
+            "scaler": scaler,
+            "feature_cols": _model_registry[key].get("feature_cols", []),
+        }
+        _model_cache[key] = info
+        return info
+
+
+# ── Pre-warming (P2-01) ───────────────────────────────────────────────────────
+def _prewarm_priority_keys() -> List[str]:
+    """Order models so the most likely to be requested load first:
+    farm-level models, then the default lightgbm turbine models, then the rest."""
+    def sort_key(k: str):
+        farm = 0 if k.startswith("farm_total_power") else 1
+        lgbm = 0 if k.endswith("_lightgbm") else 1
+        return (farm, lgbm, k)
+    return sorted(_model_registry.keys(), key=sort_key)
+
+
+def _prewarm_target_count() -> int:
+    if PREWARM_MODELS in ("0", "none", "false", ""):
+        return 0
+    if PREWARM_MODELS == "all":
+        return len(_model_registry)
+    try:
+        return max(0, int(PREWARM_MODELS))
+    except ValueError:
+        logger.warning(f"Invalid PREWARM_MODELS={PREWARM_MODELS!r}; disabling pre-warm")
+        return 0
+
+
+def _prewarm_worker(target: int):
+    global _prewarm_state
+    _prewarm_state.update(
+        in_progress=True, target=target, done=0,
+        started_at=datetime.now(timezone.utc).isoformat())
+    for key in _prewarm_priority_keys()[:target]:
+        try:
+            _get_model(key)
+        except HTTPException as e:
+            logger.warning(f"Pre-warm skipped model '{key}': {e.detail}")
+        except Exception as e:
+            logger.warning(f"Pre-warm failed for model '{key}': {e}")
+        _prewarm_state["done"] += 1
+    _prewarm_state.update(
+        in_progress=False,
+        finished_at=datetime.now(timezone.utc).isoformat())
+    logger.info(f"Pre-warm finished: {len(_model_cache)}/{len(_model_registry)} "
+                f"models in RAM (target {target})")
 
 
 def _load_availability():
@@ -230,8 +313,20 @@ async def lifespan(app: FastAPI):
         RAM_GB = psutil.Process().memory_info().rss / 1e9
     except ImportError:
         pass
+
+    # P2-01: pre-warm top-N models in a background thread so the first request
+    # is warm (no 90s+ cold-load tail). Startup-to-ready stays fast because the
+    # thread does not block the lifespan.
+    prewarm_target = _prewarm_target_count()
+    _prewarm_state.update(target=prewarm_target)
+    if prewarm_target > 0:
+        threading.Thread(
+            target=_prewarm_worker, args=(prewarm_target,),
+            daemon=True, name="prewarm").start()
+
     logger.info(f"Startup completed in {elapsed*1000:.0f}ms"
-                + (f" | RSS: {RAM_GB:.2f}GB" if RAM_GB else ""))
+                + (f" | RSS: {RAM_GB:.2f}GB" if RAM_GB else "")
+                + f" | pre-warm target: {prewarm_target}")
     yield
     # Persist benchmark on shutdown
     if _ram_benchmark:
@@ -357,13 +452,15 @@ def root():
 
 @app.get("/health")
 def health():
+    ram_bench = dict(_ram_benchmark) if _ram_benchmark else None
     return {
         "status": "ok",
         "models_in_registry": len(_model_registry),
         "models_loaded_in_ram": len(_model_cache),
         "turbines": len(TURBINES),
         "rate_limit": f"{RATE_LIMIT_REQUESTS}/{RATE_LIMIT_WINDOW_SEC}s",
-        "ram_benchmark": dict(_ram_benchmark) if _ram_benchmark else None,
+        "prewarm": dict(_prewarm_state),
+        "ram_benchmark": ram_bench,
     }
 
 

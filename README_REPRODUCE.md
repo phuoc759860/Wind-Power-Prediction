@@ -61,8 +61,23 @@ run_api.bat            # starts uvicorn WITHOUT --reload (P2-01)
 ```
 
 - Without `API_KEY` the server is FAIL-CLOSED (protected endpoints -> 503).
-- Benchmark writes `outputs/forecasts/api_benchmark.csv` (p50/p95/max latency +
-  fail-closed checks).
+- `src/api.py` (P2-01) pre-warms models in a background thread at startup
+  (`PREWARM_MODELS=all` default; `0`/`N` to disable/limit), uses one lock per
+  model so concurrent cold requests never double-load an artifact, and returns
+  503 if a single load exceeds `MODEL_LOAD_TIMEOUT` (default 30s) instead of
+  hanging — eliminating the unbounded cold-load tail.
+- Full benchmark (boots the server itself in two phases — cold lazy-load vs
+  pre-warmed — and measures startup time, RAM, cold-vs-warm p50/p95/p99, plus
+  an explicit check of the reviewer's "~96s max latency" claim):
+
+```
+.venv\Scripts\python scripts\benchmark_api.py
+```
+
+- `scripts/benchmark_api.py` writes `06_test_reports/api_benchmark.csv` (delivery
+  tree) and `outputs/forecasts/api_benchmark.csv` (startup ms, registry scan,
+  per-endpoint p50/p95/p99, cold first-request latency, RAM baseline/peak,
+  fail-closed security rows).
 
 ## 6. Change log + submission package
 
@@ -84,9 +99,9 @@ run_api.bat            # starts uvicorn WITHOUT --reload (P2-01)
 | `data/metadata/inventory_summary.json` | A06 — unified model/artifact/API/test counts |
 | `data/metadata/tb12_analysis.json` (per_split) | A07 — TB12 missing/stopped/frozen breakdown |
 | `data/metadata/availability_report.json` | A08 — observed / calendar / data-coverage availability |
-| `outputs/forecasts/farm_metrics.csv`, `farm_bias.csv`, `25_farm_bias_calibration.png` | A09 — farm-level bias + calibration |
+| `outputs/forecasts/farm_metrics.csv`, `farm_bias.csv`, `farm_horizon_window_check.csv`, `25_farm_bias_calibration.png` | A09 — farm-level bias + correction + same-window horizon check |
 | `data/metadata/alert_screening_summary.json` + alert CSVs | A10 — heuristic screening, not confirmed faults |
-| `outputs/forecasts/api_benchmark.csv` | A11 — latency p50/p95 + fail-closed security |
+| `outputs/forecasts/api_benchmark.csv` | A11 — startup + cold-vs-warm p50/p95/p99 latency, RAM, fail-closed security, cold-load tail probe |
 | `logs/wind_forecasting.log`, `run_all.bat` | A12/A13 — reproducible run log |
 
 ## Notes on data reality

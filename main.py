@@ -27,7 +27,9 @@ from src.evaluate import (evaluate_all_models, generate_evaluation_report,
                           compute_farm_level_metrics, analyze_tb12,
                           evaluate_alert_accuracy, evaluate_anomaly_detection,
                           plot_tb12_distribution, analyze_farm_bias,
-                          plot_farm_bias_calibration, append_baseline_rows)
+                          plot_farm_bias_calibration, append_baseline_rows,
+                          fit_farm_bias_correction, apply_farm_bias_correction,
+                          farm_horizon_window_check)
 from src.predict import predict_power, create_forecast_output, add_confidence_intervals, save_forecasts
 from src.audit import (raw_file_manifest, raw_timestamp_union, timestamp_audit,
                        reindex_additions_report, leakage_audit, sample_trace,
@@ -387,12 +389,20 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
 
     predictions = predict_power(test_df, all_trained_models, config)
 
+    # P1-04: fit farm bias correction on the VALIDATION split, apply to test.
+    val_predictions = predict_power(val_df, all_trained_models, config)
+    farm_bias_params = fit_farm_bias_correction(val_df, val_predictions, config)
+    corrected_test_preds = apply_farm_bias_correction(predictions, farm_bias_params)
+    for model_key, prm in farm_bias_params.items():
+        logger.info(f"  Farm bias fit {model_key}: slope={prm['slope']} intercept={prm['intercept']} "
+                    f"MAE {prm['val_mae_kw_raw']} -> {prm['val_mae_kw_corrected']} kW (val, n={prm['n_samples']})")
+
     # Same-sample persistence + ridge predictions on the TEST set (P0-03).
     test_baseline_preds = build_test_baseline_predictions(test_df, ridge_models, power_cols, config)
     persistence_preds = {t: v["persistence"] for t, v in test_baseline_preds.items()}
     ridge_preds = {t: v["ridge"] for t, v in test_baseline_preds.items()}
 
-    results_df = evaluate_all_models(test_df, predictions, baseline_results, config,
+    results_df = evaluate_all_models(test_df, predictions, config,
                                      baseline_predictions=persistence_preds,
                                      ridge_predictions=ridge_preds)
 
@@ -444,10 +454,12 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     logger.info("\n" + "-" * 50)
     logger.info("FARM-LEVEL METRICS (direct on farm total power)")
     logger.info("-" * 50)
-    farm_metrics_df = compute_farm_level_metrics(test_df, predictions, config)
+    farm_metrics_df = compute_farm_level_metrics(test_df, predictions, config,
+                                                 corrected_predictions=corrected_test_preds)
     if not farm_metrics_df.empty:
         for _, row in farm_metrics_df.iterrows():
-            logger.info(f"  {row['horizon']:6s} {row['model']:10s} MAE={row['mae']:.1f} RMSE={row['rmse']:.1f} R2={row['r2']:.4f}")
+            logger.info(f"  {row['horizon']:6s} {row['model']:10s} MAE={row['mae']:.1f} RMSE={row['rmse']:.1f} "
+                        f"R2={row['r2']:.4f} | corrected R2={row['r2_corrected']:.4f}")
         farm_metrics_df.to_csv(base_dir / "outputs" / "forecasts" / "farm_metrics.csv", index=False)
 
     # Farm-model bias analysis (P1-04): direct farm model vs sum of turbines.
@@ -462,6 +474,20 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
                             f"({row['bias_pct_rated']}% rated), farm_vs_sum={row['farm_vs_sum_turbines_kw']} kW")
     except Exception as e:
         logger.warning(f"Farm bias analysis failed: {e}")
+
+    # P1-04: same-window horizon comparison (24h vs 6h R2 artifact check).
+    try:
+        farm_window_df = farm_horizon_window_check(test_df, predictions, config)
+        if not farm_window_df.empty:
+            farm_window_df.to_csv(base_dir / "outputs" / "forecasts" / "farm_horizon_window_check.csv",
+                                  index=False)
+            for _, row in farm_window_df.iterrows():
+                if row["horizon_a"] == "6hour" and row["horizon_b"] == "24hour":
+                    logger.info(f"  Farm window check {row['horizon_a']} vs {row['horizon_b']}: "
+                                f"n_common={row['n_common_samples']} R2_6h={row['r2_a_on_common']} "
+                                f"R2_24h={row['r2_b_on_common']} (delta={row['r2_b_minus_a_on_common']})")
+    except Exception as e:
+        logger.warning(f"Farm horizon window check failed: {e}")
 
     # TB12 specific analysis
     logger.info("\n" + "-" * 50)

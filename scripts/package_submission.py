@@ -73,8 +73,10 @@ def main():
     tr = DEST / "06_test_reports"
     tr.mkdir(parents=True, exist_ok=True)
     for name in ["pytest_report.txt", "api_benchmark.csv", "run_log.txt"]:
+        _copy(BASE_DIR / name, tr)
         _copy(BASE_DIR / "outputs" / "forecasts" / name, tr)
         _copy(BASE_DIR / "logs" / name, tr)
+        _copy(BASE_DIR / "06_test_reports" / name, tr)
     logs = BASE_DIR / "logs"
     if logs.exists():
         shutil.copytree(logs, tr / "logs", dirs_exist_ok=True)

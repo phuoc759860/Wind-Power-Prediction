@@ -1,4 +1,3 @@
-
 ANH MINH GLOBAL CO., LTD. (AMG)
 PHIẾU NHẬN XÉT VÀ YÊU CẦU CHỈNH SỬA
 HỆ THỐNG DỰ BÁO CÔNG SUẤT ĐIỆN GIÓ ĐA CHÂN TRỜI
@@ -18,7 +17,6 @@ Mức kết luận hiện tại
 Prototype khá; chưa đủ điều kiện nghiệm thu kết quả dự báo
 Người nhận xét: GS. TSKH. Ngô Đăng Lưu
 Thành phố Hồ Chí Minh, tháng 7 năm 2026
-
 1. MỤC ĐÍCH VÀ PHẠM VI KIỂM TRA
 Văn bản này tổng hợp các nhận xét kỹ thuật đối với báo cáo hệ thống dự báo công suất điện gió đa chân trời của sinh viên. Mục tiêu không chỉ là chỉnh sửa hình thức báo cáo, mà quan trọng hơn là kiểm tra lại tính đúng đắn của dữ liệu, quy trình huấn luyện, cơ chế chống rò rỉ dữ liệu, phép đánh giá mô hình, khả năng tái lập kết quả và mức độ sẵn sàng triển khai phần mềm.
 Sinh viên phải xử lý theo nguyên tắc: sửa mã nguồn trước, chạy lại toàn bộ pipeline từ dữ liệu thô, lưu bằng chứng đầu ra, sau đó mới cập nhật lại báo cáo PDF. Không được chỉ thay số hoặc sửa nội dung trong báo cáo mà không có kết quả chạy lại tương ứng.
@@ -91,7 +89,6 @@ In toàn bộ tên cột đầu vào của Ridge; khẳng định target_column 
 Kiểm tra timestamp_target = timestamp_issue + horizon; không được ghép theo cùng index nếu đã shift target.
 Chạy lại baseline sau khi sửa và lưu log, commit hash, random seed, thời gian chạy.
 assert target_column not in X.columnsassert feature_timestamp.max() < target_timestamp.min()  # kiểm tra theo từng mẫu/khối phù hợpassert timestamp_target == timestamp_issue + pd.Timedelta(minutes=horizon_min)assert not np.allclose(y_pred_ridge, y_true)
-
 Điều kiện đóng lỗi P0-01
 Chỉ được đóng lỗi khi Ridge cho kết quả hợp lý, pipeline được chạy lại từ dữ liệu thô và có bảng truy vết timestamp chứng minh không sử dụng thông tin tương lai.
 4.2. Lỗi P0-02: Thời gian dữ liệu và số lượng mẫu không nhất quán
@@ -123,25 +120,18 @@ Nhóm đối tượng
 Số lượng thực tế
 Cách đếm tự động
 Model XGBoost triển khai
-
 Đếm file metadata/model có algorithm=xgboost
 Model LightGBM triển khai
-
 Đếm file metadata/model có algorithm=lightgbm
 Baseline models
-
 Đếm persistence/ridge thực tế
 Scaler/imputer/feature lists
-
 Đếm theo loại artifact
 Tổng model artifacts
-
 Đếm file hợp lệ trong models/
 API routes
-
 Đọc trực tiếp app.routes
 Tests collected/passed/failed/skipped
-
 Lấy từ pytest --collect-only và pytest report
 4.5. Lỗi P1-02: Tỷ lệ thiếu dữ liệu TB12 không thống nhất
 Báo cáo ghi TB12 thiếu 6,92% ở phần chất lượng dữ liệu, nhưng phần phân tích TB12 lại ghi 43,89%. Hai con số có thể xuất phát từ hai phạm vi tính khác nhau, song báo cáo hiện chưa giải thích.
@@ -207,7 +197,6 @@ Bước 10 – Tái tạo báo cáo: Mọi bảng và hình phải sinh tự đ�
 6. CẤU TRÚC KẾT QUẢ PHẢI NỘP LẠI
 Sinh viên nộp lại theo đúng cấu trúc thư mục sau:
 AMG_Wind_Forecasting_Revision/├── 01_raw_data_manifest/│   ├── data_manifest.csv│   └── checksums.txt├── 02_source_code/│   ├── src/│   ├── configs/│   ├── tests/│   ├── main.py│   └── requirements.txt├── 03_audit_evidence/│   ├── timestamp_audit.csv│   ├── leakage_audit.csv│   ├── split_statistics.json│   ├── inventory_summary.json│   └── sample_trace_TB02_24h.csv├── 04_models/├── 05_outputs/│   ├── forecasts/│   ├── metrics/│   └── figures/├── 06_test_reports/│   ├── pytest_report.txt│   ├── api_benchmark.csv│   └── run_log.txt├── 07_report/│   ├── AMG_Wind_Power_Forecasting_Report_Revised.pdf│   └── change_log.docx└── README_REPRODUCE.md
-
 7. BẢNG TIÊU CHÍ NGHIỆM THU LẦN TIẾP THEO
 Mã
 Tiêu chí
@@ -286,55 +275,15 @@ Nguyên nhân gốc
 Cách sửa và file liên quan
 Bằng chứng sau sửa
 1
-
-
-
-
 2
-
-
-
-
 3
-
-
-
-
 4
-
-
-
-
 5
-
-
-
-
 6
-
-
-
-
 7
-
-
-
-
 8
-
-
-
-
 9
-
-
-
-
 10
-
-
-
-
 9. YÊU CẦU VỀ BÁO CÁO KỸ THUẬT SAU CHỈNH SỬA
 Trang đầu phải ghi chính xác thời gian dữ liệu, số hàng gốc, số mẫu hữu hiệu và ngày chạy pipeline.
 Mỗi bảng kết quả phải ghi rõ phạm vi dữ liệu, số mẫu n, cấp tua-bin/cấp trang trại và cách chuẩn hóa.

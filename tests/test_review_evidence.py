@@ -141,3 +141,120 @@ def test_screening_summary_json_structure(tmp_path, monkeypatch):
     assert summary["status"] == "SCREENING_ONLY"
     assert summary["confirmed_by_operator"] is False
     assert summary["file_counts"]["ramp_alert"]["n_rows"] == 2
+
+
+def test_farm_metrics_score_against_horizon_target():
+    """P1-04: farm metrics must be scored on P(t+h), not the base farm_total_power."""
+    from src.evaluate import compute_farm_level_metrics
+
+    n = 50
+    base = np.full(n, 1000.0)
+    target = np.sin(np.arange(n) / 3.0) * 300 + 1200
+    preds = target + np.random.default_rng(0).normal(0, 10, n)
+
+    test_data = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="10min"),
+        "farm_total_power": base,
+        "farm_total_power_target_10min": target,
+    })
+    config = {"forecasting": {"horizons": [{"name": "10min", "steps": 1}]}}
+    predictions = {"farm_total_power_target_10min_lgb": {
+        "model_name": "lightgbm", "target": "farm_total_power_target_10min",
+        "predictions": preds}}
+    df = compute_farm_level_metrics(test_data, predictions, config)
+    assert not df.empty
+    assert df["horizon"].iloc[0] == "10min"
+    assert df["r2"].iloc[0] > 0.9
+    assert df["n_samples"].iloc[0] == n
+
+
+def test_farm_bias_correction_fit_and_apply():
+    from src.evaluate import fit_farm_bias_correction, apply_farm_bias_correction
+
+    rng = np.random.default_rng(1)
+    n = 80
+    p = rng.uniform(0, 26400, n)
+    actual = 1.2 * p + 500
+
+    val_df = pd.DataFrame({"farm_total_power_target_6hour": actual})
+    key = "farm_total_power_target_6hour_lgb"
+    val_preds = {key: {"model_name": "lightgbm", "target": "farm_total_power_target_6hour",
+                       "predictions": p}}
+    config = {"forecasting": {"horizons": [{"name": "6hour", "steps": 36}]}}
+
+    params = fit_farm_bias_correction(val_df, val_preds, config)
+    assert key in params
+    prm = params[key]
+    assert prm["slope"] == pytest.approx(1.2, abs=0.05)
+    assert prm["intercept"] == pytest.approx(500, abs=30)
+    assert prm["val_mae_kw_corrected"] < prm["val_mae_kw_raw"]
+
+    test_preds = {key: {"model_name": "lightgbm", "target": "farm_total_power_target_6hour",
+                        "predictions": p},
+                  "TB01_power_target_6hour_lgb": {"model_name": "lightgbm",
+                                                  "target": "TB01_power_target_6hour",
+                                                  "predictions": p}}
+    corrected = apply_farm_bias_correction(test_preds, params)
+    assert corrected[key]["bias_corrected"] is True
+    np.testing.assert_allclose(corrected[key]["predictions"], 1.2 * p + 500, atol=0.5)
+    np.testing.assert_allclose(corrected["TB01_power_target_6hour_lgb"]["predictions"], p)
+    assert "bias_corrected" not in corrected["TB01_power_target_6hour_lgb"]
+
+
+def test_farm_metrics_include_bias_corrected_columns():
+    from src.evaluate import compute_farm_level_metrics
+
+    rng = np.random.default_rng(3)
+    n = 40
+    p = rng.uniform(500, 20000, n)
+    actual = 1.1 * p
+
+    test_data = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="10min"),
+        "farm_total_power_target_10min": actual,
+    })
+    key = "farm_total_power_target_10min_lgb"
+    raw = {"predictions": p, "model_name": "lightgbm", "target": "farm_total_power_target_10min"}
+    corrected = dict(raw, predictions=actual, kind="linear", slope=1.1,
+                     intercept=0.0, scalar_offset_kw=0.0)
+    config = {"forecasting": {"horizons": [{"name": "10min", "steps": 1}]}}
+    df = compute_farm_level_metrics(test_data, {key: raw}, config,
+                                    corrected_predictions={key: corrected})
+    row = df.iloc[0]
+    assert row["r2_corrected"] > 0.99
+    assert abs(row["bias_corrected"]) < 1e-3
+    assert row["correction_slope"] == 1.1
+
+
+def test_farm_horizon_window_check_uses_identical_samples():
+    from src.evaluate import farm_horizon_window_check
+
+    rng = np.random.default_rng(2)
+    n = 60
+    t = np.sin(np.arange(n) / 2.0) * 300 + 1200
+    t_6h = t.copy()
+    t_24h = t.copy()
+    t_24h[-24:] = np.nan  # shift(-144) trailing NaNs
+
+    test_data = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="10min"),
+        "farm_total_power_target_6hour": t_6h,
+        "farm_total_power_target_24hour": t_24h,
+    })
+    noise = rng.normal(0, 20, n)
+    predictions = {
+        "farm_total_power_target_6hour_lgb": {
+            "model_name": "lightgbm", "target": "farm_total_power_target_6hour",
+            "predictions": t_6h + noise},
+        "farm_total_power_target_24hour_lgb": {
+            "model_name": "lightgbm", "target": "farm_total_power_target_24hour",
+            "predictions": t_24h + noise},
+    }
+    config = {"forecasting": {"horizons": [{"name": "6hour", "steps": 36},
+                                           {"name": "24hour", "steps": 144}]}}
+    df = farm_horizon_window_check(test_data, predictions, config)
+    row = df[(df["horizon_a"] == "6hour") & (df["horizon_b"] == "24hour")].iloc[0]
+    assert bool(row["window_identical"]) is True
+    assert row["n_common_samples"] == n - 24
+    assert pd.notna(row["r2_a_on_common"])
+    assert pd.notna(row["r2_b_on_common"])

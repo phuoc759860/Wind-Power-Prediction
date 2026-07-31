@@ -29,6 +29,7 @@ HORIZON_LABELS = {
 }
 
 TURBINE_IDS = [f"TB{i:02d}" for i in range(1, 13)]
+TB12_SUFFIXES = ["_power", "_wind_speed", "_temperature", "_frequency"]
 
 
 def _model_display_name(name: str) -> str:
@@ -89,7 +90,7 @@ def compute_skill_score(rmse_model: float, rmse_baseline: float) -> float:
     return round(1 - rmse_model / rmse_baseline, 4)
 
 
-def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict, baseline_metrics: Dict,
+def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict,
                         config: dict, baseline_predictions: Dict = None,
                         ridge_predictions: Dict = None,
                         rated_power: float = 2200) -> pd.DataFrame:
@@ -125,14 +126,6 @@ def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict, baseline_met
                 horizon = h["name"]
                 break
 
-        base_target = target.replace(f"_target_{horizon}", "") if horizon != "unknown" else target
-        baseline_key = f"{base_target}_{horizon}" if horizon != "unknown" else base_target
-        if baseline_key in baseline_metrics:
-            rmse_base = baseline_metrics[baseline_key].get("rmse", np.nan)
-            skill = compute_skill_score(metrics["rmse"], rmse_base)
-        else:
-            skill = np.nan
-
         # Skill vs persistence on the SAME test samples (P0-03 fix).
         skill_vs_persistence = np.nan
         skill_vs_ridge = np.nan
@@ -163,7 +156,7 @@ def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict, baseline_met
             "bias": metrics["bias"],
             "r2": metrics["r2"],
             "max_error": metrics["max_error"],
-            "skill_score": skill,
+            "skill_score": skill_vs_persistence,
             "skill_vs_persistence": skill_vs_persistence,
             "skill_vs_ridge": skill_vs_ridge,
             "rmse_excl_capacity_zero": metrics_excl["rmse"],
@@ -535,16 +528,24 @@ def plot_radar_summary(results_df: pd.DataFrame, save_path: str = None):
 
 
 def compute_farm_level_metrics(test_data: pd.DataFrame, predictions: Dict,
-                                config: dict, rated_power: float = 26400) -> pd.DataFrame:
+                               config: dict, rated_power: float = 26400,
+                               corrected_predictions: Dict = None) -> pd.DataFrame:
+    """Farm-level metrics per farm-target model (reviewer P1-04).
+
+    Each farm forecast is scored against its OWN horizon target column
+    (farm_total_power_target_{h}, i.e. the P(t+h) ground truth) rather than
+    the base farm_total_power column, so every horizon uses the same
+    valid-sample filtering as the turbine-level evaluation. When
+    corrected_predictions is provided, raw and bias-corrected metrics are
+    reported side by side (P1-04).
+    """
     farm_results = []
-    farm_actual = test_data["farm_total_power"].values if "farm_total_power" in test_data.columns else None
-    if farm_actual is None:
-        return pd.DataFrame()
+    corrected_predictions = corrected_predictions or {}
 
     for model_key, pred_info in predictions.items():
         model_name = pred_info.get("model_name", "unknown")
         target = pred_info.get("target", model_key)
-        if "farm_total_power" not in target:
+        if "farm_total_power" not in target or target not in test_data.columns:
             continue
         pred_values = pred_info.get("predictions")
         if pred_values is None:
@@ -556,9 +557,19 @@ def compute_farm_level_metrics(test_data: pd.DataFrame, predictions: Dict,
                 horizon = h["name"]
                 break
 
-        n = min(len(farm_actual), len(pred_values))
-        metrics = compute_metrics(farm_actual[:n], pred_values[:n], rated_power)
-        farm_results.append({
+        rp = _rated_power_for_target(target, rated_power)
+        n = min(len(test_data[target]), len(pred_values))
+        actual = np.asarray(test_data[target].values[:n], dtype=float)
+        preds = np.asarray(pred_values[:n], dtype=float)
+        valid = ~(np.isnan(actual) | np.isnan(preds))
+        if valid.sum() == 0:
+            continue
+
+        metrics = compute_metrics(actual, preds, rp)
+        cap_mask = (actual >= rp * 0.95) & valid
+        zero_mask = (actual <= rp * 0.01) & valid
+
+        row = {
             "target": target,
             "model": model_name,
             "horizon": horizon,
@@ -570,10 +581,186 @@ def compute_farm_level_metrics(test_data: pd.DataFrame, predictions: Dict,
             "r2": metrics["r2"],
             "max_error": metrics["max_error"],
             "n_samples": metrics["n_samples"],
+            "n_at_capacity": int(cap_mask.sum()),
+            "n_zero_power": int(zero_mask.sum()),
             "level": "farm_total",
-        })
+        }
+
+        corr_info = corrected_predictions.get(model_key)
+        if corr_info is not None and corr_info.get("predictions") is not None:
+            corr_preds = np.asarray(corr_info["predictions"], dtype=float)[:n]
+            corr_metrics = compute_metrics(actual, corr_preds, rp)
+            for col in ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2", "max_error"]:
+                row[f"{col}_corrected"] = corr_metrics[col]
+            row["n_samples_corrected"] = corr_metrics["n_samples"]
+            row["correction_kind"] = corr_info.get("kind", "linear")
+            row["correction_slope"] = corr_info.get("slope")
+            row["correction_intercept"] = corr_info.get("intercept")
+            row["correction_scalar_kw"] = corr_info.get("scalar_offset_kw")
+        else:
+            for col in ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2", "max_error"]:
+                row[f"{col}_corrected"] = np.nan
+            row["n_samples_corrected"] = np.nan
+            row["correction_kind"] = np.nan
+            row["correction_slope"] = np.nan
+            row["correction_intercept"] = np.nan
+            row["correction_scalar_kw"] = np.nan
+
+        farm_results.append(row)
 
     return pd.DataFrame(farm_results)
+
+
+def fit_farm_bias_correction(val_df: pd.DataFrame, val_predictions: Dict,
+                             config: dict, rated_power: float = 26400) -> Dict:
+    """Fit a per-model bias offset on the validation split (reviewer P1-04).
+
+    For each farm-target model fits corrected = slope * pred + intercept via
+    ordinary least squares against the validation horizon target
+    (farm_total_power_target_{h}). Also records the plain scalar mean offset
+    and the raw-vs-corrected MAE so the report can show the correction gain.
+    Returns a dict keyed by model_key (farm models only).
+    """
+    params = {}
+    for model_key, pred_info in val_predictions.items():
+        target = pred_info.get("target", model_key)
+        if "farm_total_power" not in target or "_target_" not in target:
+            continue
+        if target not in val_df.columns:
+            continue
+        pred_values = pred_info.get("predictions")
+        if pred_values is None:
+            continue
+
+        n = min(len(val_df[target]), len(pred_values))
+        actual = np.asarray(val_df[target].values[:n], dtype=float)
+        preds = np.asarray(pred_values[:n], dtype=float)
+        valid = ~(np.isnan(actual) | np.isnan(preds))
+        if valid.sum() < 2:
+            continue
+        a = actual[valid]
+        p = preds[valid]
+
+        design = np.column_stack([p, np.ones(len(p))])
+        slope, intercept = np.linalg.lstsq(design, a, rcond=None)[0]
+
+        corrected = slope * p + intercept
+        mae_raw = float(np.mean(np.abs(p - a)))
+        mae_corr = float(np.mean(np.abs(corrected - a)))
+        bias_raw = float(np.mean(p - a))
+
+        params[model_key] = {
+            "kind": "linear",
+            "slope": round(float(slope), 6),
+            "intercept": round(float(intercept), 4),
+            "scalar_offset_kw": round(float(np.mean(a - p)), 4),
+            "n_samples": int(valid.sum()),
+            "val_bias_kw_raw": round(bias_raw, 4),
+            "val_mae_kw_raw": round(mae_raw, 4),
+            "val_mae_kw_corrected": round(mae_corr, 4),
+        }
+    return params
+
+
+def apply_farm_bias_correction(predictions: Dict, bias_params: Dict) -> Dict:
+    """Return a copy of predictions with farm forecasts bias-corrected (P1-04).
+
+    corrected = slope * pred + intercept using per-model params fitted on the
+    validation split. Non-farm predictions are passed through unchanged.
+    """
+    corrected = {}
+    for model_key, pred_info in predictions.items():
+        info = dict(pred_info)
+        info["predictions"] = np.asarray(pred_info.get("predictions"), dtype=float).copy()
+        if model_key in bias_params:
+            prm = bias_params[model_key]
+            info["predictions"] = prm["slope"] * info["predictions"] + prm["intercept"]
+            info["bias_corrected"] = True
+            info["correction_kind"] = prm.get("kind", "linear")
+            info["slope"] = prm.get("slope")
+            info["intercept"] = prm.get("intercept")
+            info["scalar_offset_kw"] = prm.get("scalar_offset_kw")
+        corrected[model_key] = info
+    return corrected
+
+
+def farm_horizon_window_check(test_data: pd.DataFrame, predictions: Dict,
+                              config: dict, rated_power: float = 26400) -> pd.DataFrame:
+    """Verify horizon-to-horizon farm R2 comparisons are not a sampling artifact (P1-04).
+
+    For every pair of farm horizons, R2 is recomputed on the intersection of
+    valid target samples (identical test window, timestamps and
+    n_at_capacity / n_zero_power masks), so claims such as 24h R2 > 6h R2 can
+    be checked against exactly the same samples.
+    """
+    horizons = [h["name"] for h in config.get("forecasting", {}).get("horizons", [])]
+    farm_targets = {h: f"farm_total_power_target_{h}" for h in horizons
+                    if f"farm_total_power_target_{h}" in test_data.columns}
+
+    preds_by_target = {}
+    for model_key, pred_info in predictions.items():
+        target = pred_info.get("target", model_key)
+        if target in farm_targets.values() and target not in preds_by_target:
+            preds_by_target[target] = np.asarray(pred_info["predictions"], dtype=float)
+
+    farm_cols = set(farm_targets.values())
+    ts = test_data["timestamp"].values if "timestamp" in test_data.columns else None
+    rows = []
+    for h_a in horizons:
+        t_a = f"farm_total_power_target_{h_a}"
+        if t_a not in farm_cols or t_a not in preds_by_target:
+            continue
+        n_a = min(len(test_data[t_a]), len(preds_by_target[t_a]))
+        actual_a = np.asarray(test_data[t_a].values[:n_a], dtype=float)
+        pred_a = preds_by_target[t_a][:n_a]
+        valid_a = ~(np.isnan(actual_a) | np.isnan(pred_a))
+        rp = _rated_power_for_target(t_a, rated_power)
+
+        for h_b in horizons:
+            if h_b == h_a:
+                continue
+            t_b = f"farm_total_power_target_{h_b}"
+            if t_b not in farm_cols or t_b not in preds_by_target:
+                continue
+            n_b = min(len(test_data[t_b]), len(preds_by_target[t_b]))
+            actual_b = np.asarray(test_data[t_b].values[:n_b], dtype=float)
+            pred_b = preds_by_target[t_b][:n_b]
+            valid_b = ~(np.isnan(actual_b) | np.isnan(pred_b))
+
+            n_common = min(n_a, n_b)
+            common = valid_a[:n_common] & valid_b[:n_common]
+            if common.sum() < 2:
+                continue
+
+            r2_a = r2_score(actual_a[:n_common][common], pred_a[:n_common][common])
+            r2_b = r2_score(actual_b[:n_common][common], pred_b[:n_common][common])
+
+            cap_a = (actual_a[:n_common][common] >= rp * 0.95).sum()
+            cap_b = (actual_b[:n_common][common] >= rp * 0.95).sum()
+            zero_a = (actual_a[:n_common][common] <= rp * 0.01).sum()
+            zero_b = (actual_b[:n_common][common] <= rp * 0.01).sum()
+
+            rows.append({
+                "horizon_a": h_a,
+                "horizon_b": h_b,
+                "n_samples_a": int(valid_a.sum()),
+                "n_samples_b": int(valid_b.sum()),
+                "n_common_samples": int(common.sum()),
+                "window_identical": bool(common.sum() == valid_b[:n_common].sum()),
+                "window_start": str(ts[:n_common][common][0]) if ts is not None and common.any() else None,
+                "window_end": str(ts[:n_common][common][-1]) if ts is not None and common.any() else None,
+                "r2_a_on_common": round(r2_a, 4),
+                "r2_b_on_common": round(r2_b, 4),
+                "r2_b_minus_a_on_common": round(r2_b - r2_a, 4),
+                "n_at_capacity_a_common": int(cap_a),
+                "n_at_capacity_b_common": int(cap_b),
+                "n_zero_power_a_common": int(zero_a),
+                "n_zero_power_b_common": int(zero_b),
+                "note": ("Both horizons scored on the intersection of valid target samples: "
+                         "identical test window, timestamps and capacity/zero masks."),
+            })
+
+    return pd.DataFrame(rows)
 
 
 def analyze_farm_bias(test_data: pd.DataFrame, predictions: Dict,
@@ -687,26 +874,48 @@ def analyze_tb12(test_data: pd.DataFrame, results_df: pd.DataFrame,
     if tb12_power is None:
         return tb12_analysis
 
-    # P1-02: missing/stopped/frozen breakdown per split (train/val/test).
+    # P1-02: per-column missing/stopped/frozen breakdown per split (train/val/test),
+    # plus effective sample counts after target shift for every TB12 horizon.
     if split_data:
         tb12_analysis["per_split"] = {}
         for split_name, df in split_data.items():
-            col = f"TB12_power"
-            if col not in df.columns:
-                continue
-            vals = df[col].values
-            frozen = _detect_frozen_data(vals)
-            tb12_analysis["per_split"][split_name] = {
-                "n_rows": int(len(df)),
-                "missing_rate_pct": round(np.isnan(vals).mean() * 100, 2) if len(vals) else None,
-                "stopped_rate_pct": round(((vals == 0) | (vals < 5)).sum() / len(vals) * 100, 2) if len(vals) else None,
-                "frozen_blocks": frozen["count"],
-                "frozen_ratio_pct": round(frozen["ratio"] * 100, 2),
-                "mean_power_kw": round(float(np.nanmean(vals)), 1) if len(vals) else None,
-            }
+            entry = {"n_rows": int(len(df))}
+            for suffix in TB12_SUFFIXES:
+                col = f"TB12{suffix}"
+                if col not in df.columns:
+                    continue
+                vals = df[col].to_numpy(dtype=float)
+                entry[f"missing_rate{suffix}"] = (
+                    round(np.isnan(vals).mean() * 100, 2) if len(vals) else None)
+                if suffix == "_power":
+                    frozen = _detect_frozen_data(vals)
+                    entry["missing_rate_pct"] = entry["missing_rate_power"]
+                    entry["stopped_rate_pct"] = (
+                        round(((vals == 0) | (vals < 5)).sum() / len(vals) * 100, 2)
+                        if len(vals) else None)
+                    entry["frozen_blocks"] = frozen["count"]
+                    entry["frozen_ratio_pct"] = round(frozen["ratio"] * 100, 2)
+                    entry["mean_power_kw"] = (
+                        round(float(np.nanmean(vals)), 1)
+                        if len(vals) and np.any(~np.isnan(vals)) else None)
+            for col in df.columns:
+                if col.startswith("TB12_power_target_"):
+                    h = col.split("_target_", 1)[1]
+                    target_vals = df[col].to_numpy(dtype=float)
+                    entry[f"effective_samples_{h}"] = int((~np.isnan(target_vals)).sum())
+                    entry[f"invalid_targets_{h}"] = int(np.isnan(target_vals).sum())
+            tb12_analysis["per_split"][split_name] = entry
 
     tb12_power_values = tb12_power.values
     tb12_analysis["missing_rate"] = round(np.isnan(tb12_power_values).mean() * 100, 2)
+    tb12_analysis["missing_rate_power"] = tb12_analysis["missing_rate"]
+    for suffix in TB12_SUFFIXES[1:]:
+        col = f"TB12{suffix}"
+        if col not in test_data.columns:
+            continue
+        vals = test_data[col].values
+        tb12_analysis[f"missing_rate{suffix}"] = (
+            round(np.isnan(vals).mean() * 100, 2) if len(vals) else None)
     tb12_analysis["stopped_rate"] = round(((tb12_power_values == 0) | (tb12_power_values < 5)).sum() / len(tb12_power_values) * 100, 2)
     tb12_analysis["mean_power_when_operating"] = round(np.nanmean(tb12_power_values[tb12_power_values > 5]), 2)
 

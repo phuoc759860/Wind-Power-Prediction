@@ -63,6 +63,15 @@ def get_styles():
         fontSize=12, leading=15, textColor=BLUE_MED,
         spaceBefore=4 * mm, spaceAfter=2 * mm,
     ))
+    styles.add(ParagraphStyle("ToCTitle", parent=styles["SectionH1"]))
+    styles.add(ParagraphStyle(
+        "TOCLevel1", parent=styles["Normal"],
+        fontSize=10.5, leading=16, fontName="Helvetica-Bold", textColor=BLUE_DARK,
+    ))
+    styles.add(ParagraphStyle(
+        "TOCLevel2", parent=styles["Normal"],
+        fontSize=10, leading=16, leftIndent=15,
+    ))
     styles.add(ParagraphStyle(
         "BodyText2", parent=styles["Normal"],
         fontSize=10, leading=14, alignment=TA_JUSTIFY,
@@ -99,6 +108,18 @@ def get_styles():
     return styles
 
 
+_WRAP_STYLE = None
+
+
+def _wrap_style():
+    global _WRAP_STYLE
+    if _WRAP_STYLE is None:
+        _WRAP_STYLE = ParagraphStyle(
+            "CellWrap", fontName="Helvetica", fontSize=8, leading=10, alignment=TA_LEFT,
+        )
+    return _WRAP_STYLE
+
+
 def _make_table(data, col_widths=None, header_color=BLUE_MED):
     if not data:
         return Spacer(1, 1)
@@ -107,7 +128,18 @@ def _make_table(data, col_widths=None, header_color=BLUE_MED):
         while len(r) < ncols:
             r.append("")
 
-    tbl = Table(data, colWidths=col_widths, repeatRows=1)
+    rows = []
+    for r in data:
+        out = []
+        for cell in r:
+            if isinstance(cell, str) and len(cell) > 40 and "\n" not in cell:
+                safe = cell.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                out.append(Paragraph(safe, _wrap_style()))
+            else:
+                out.append(cell)
+        rows.append(out)
+
+    tbl = Table(rows, colWidths=col_widths, repeatRows=1)
     style_cmds = [
         ("BACKGROUND", (0, 0), (-1, 0), header_color),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
@@ -138,6 +170,27 @@ def _fig(name, w=160 * mm, h=100 * mm):
     if not path.exists():
         return Spacer(1, 1)
     return Image(str(path), width=w, height=h, kind="proportional")
+
+
+_TOC_PAGES = {}
+
+
+def _norm_heading(text):
+    return " ".join(text.split())
+
+
+class ReportDocTemplate(SimpleDocTemplate):
+    def afterFlowable(self, flowable):
+        if not isinstance(flowable, Paragraph):
+            return
+        style = flowable.style.name
+        if style not in ("SectionH1", "SectionH2"):
+            return
+        text = flowable.getPlainText()
+        _TOC_PAGES[_norm_heading(text)] = self.page
+        key = "bm_" + _norm_heading(text)
+        self.canv.bookmarkPage(key)
+        self.canv.addOutlineEntry(text, key, 0 if style == "SectionH1" else 1, 0)
 
 
 class ReportBuilder:
@@ -266,50 +319,67 @@ class ReportBuilder:
 
     def build_toc(self):
         s = self.styles
-        self.story.append(Paragraph("Table of Contents", s["SectionH1"]))
+        self.story.append(Paragraph("Table of Contents", s["ToCTitle"]))
         self.story.append(_section_line())
-        toc_items = [
-            ("1.", "Executive Summary", "3"),
-            ("2.", "Project Overview", "3"),
-            ("", "2.1  Wind Farm Description", "3"),
-            ("", "2.2  Project Objectives", "3"),
-            ("3.", "Data Description", "4"),
-            ("", "3.1  SCADA Data Overview", "4"),
-            ("", "3.2  Data Quality Analysis", "4"),
-            ("", "3.3  Turbine Availability", "5"),
-            ("4.", "Methodology", "6"),
-            ("", "4.1  Pipeline Architecture", "6"),
-            ("", "4.2  Feature Engineering", "6"),
-            ("", "4.3  Time Series Split & Validation", "7"),
-            ("", "4.4  Model Training", "7"),
-            ("", "4.5  Evaluation Metrics", "8"),
-            ("5.", "Results", "9"),
-            ("", "5.1  Model Performance Overview", "9"),
-            ("", "5.2  Horizon Decay Analysis", "10"),
-            ("", "5.3  Model Comparison", "10"),
-            ("", "5.4  Farm-Level Results", "11"),
-            ("", "5.5  TB12 Turbine Analysis", "11"),
-            ("", "5.6  Operational Analysis", "12"),
-            ("", "5.7  Alert Accuracy", "12"),
-            ("", "5.8  Validation Charts", "13"),
-            ("", "5.9  Full Backtest Results", "14"),
-            ("6.", "API & Dashboard", "14"),
-            ("", "6.1  System Architecture", "14"),
-            ("", "6.2  API Endpoints", "14"),
-            ("7.", "Output Files (Doc Section 15)", "15"),
-            ("8.", "Requirements Traceability Matrix", "15"),
-            ("9.", "Source Code & Reproducible Configuration", "16"),
-            ("10.", "API Test Report", "17"),
-            ("11.", "Feature Status & Roadmap", "18"),
-            ("12.", "Conclusions & Future Work", "19"),
-            ("A.", "Appendix A: Response to Review Comments (v2.0.0)", "20"),
+        sections = [
+            ("1.", "Executive Summary"),
+            ("2.", "Project Overview"),
+            ("", "2.1 Wind Farm Description"),
+            ("", "2.2 Project Objectives"),
+            ("3.", "Data Description"),
+            ("", "3.1 SCADA Data Overview"),
+            ("", "3.2 Data Quality Analysis"),
+            ("", "3.3 Turbine Availability"),
+            ("4.", "Methodology"),
+            ("", "4.1 Pipeline Architecture"),
+            ("", "4.2 Feature Engineering"),
+            ("", "4.3 Time Series Split & Validation"),
+            ("", "4.4 Model Training"),
+            ("", "4.5 Evaluation Metrics"),
+            ("5.", "Results"),
+            ("", "5.1 Model Performance Overview"),
+            ("", "5.2 Horizon Decay Analysis"),
+            ("", "5.3 Model Comparison"),
+            ("", "5.4 Farm-Level Results"),
+            ("", "5.5 TB12 Turbine Analysis"),
+            ("", "5.6 Operational Analysis"),
+            ("", "5.7 Alert Accuracy"),
+            ("", "5.8 Validation Charts"),
+            ("", "5.9 Full Backtest Results"),
+            ("6.", "API & Dashboard"),
+            ("", "6.1 System Architecture"),
+            ("", "6.2 API Endpoints"),
+            ("7.", "Output Files (Doc Section 15 Compliance)"),
+            ("8.", "Requirements Traceability Matrix"),
+            ("9.", "Source Code & Reproducible Configuration"),
+            ("", "9.1 Project Structure"),
+            ("", "9.2 Dependencies"),
+            ("", "9.3 End-to-End Reproduction"),
+            ("10.", "API Test Report"),
+            ("", "10.1 Endpoint Test Results"),
+            ("", "10.2 Schema Validation & Authentication"),
+            ("", "10.3 Latency & Resource Benchmark"),
+            ("11.", "Feature Status & Roadmap"),
+            ("", "11.1 Implemented Features"),
+            ("", "11.2 Prototype / Document-only"),
+            ("", "11.3 Planned Features"),
+            ("12.", "Conclusions & Future Work"),
+            ("", "12.1 Conclusions"),
+            ("", "12.2 Future Work"),
+            ("A.", "Appendix A. Response to Review Comments (v2.0.0)"),
         ]
-        for num, title, pg in toc_items:
+        for num, title in sections:
             indent = 15 if num == "" else 0
-            style = ParagraphStyle("toc_entry", parent=s["BodyText2"], leftIndent=indent,
-                                   fontSize=10, leading=16, fontName="Helvetica" if num == "" else "Helvetica-Bold")
-            text = f"{num}  {title} {'.' * (60 - len(title))} {pg}" if num else f"     {title} {'.' * (55 - len(title))} {pg}"
-            self.story.append(Paragraph(text, style))
+            entry_style = ParagraphStyle(
+                "toc_entry", parent=s["BodyText2"], leftIndent=indent,
+                fontSize=10, leading=16, fontName="Helvetica" if num == "" else "Helvetica-Bold",
+            )
+            pg = str(_TOC_PAGES.get(_norm_heading(title), ""))
+            if not pg:
+                pg = " "
+            dots = "." * (60 - len(title)) if num else "." * (55 - len(title))
+            text = f"{num}  {title} {dots} {pg}" if num else f"     {title} {dots} {pg}"
+            self.story.append(Paragraph(text, entry_style))
         self.story.append(PageBreak())
 
     def build_executive_summary(self):
@@ -342,8 +412,9 @@ class ReportBuilder:
             f"({best_info}). The system includes {self.model_joblibs} model artifacts ({model_label} models) "
             "covering all 12 turbines plus farm-level aggregation across 5 forecast horizons. A FastAPI-based "
             f"REST API serves {self.n_api_endpoints} endpoints including real-time prediction, evaluation metrics, "
-            "and alert generation. The system implements the output-file formatting required by the Vietnamese "
-            "technical specification (Section 15).",
+            "and alert generation. The system writes every output file according to the project output "
+            "schema (Section 15: Dinh dang file dau ra) with defined column names, forecast_quality labels, "
+            "and 95% confidence-interval fields.",
             s["BodyText2"],
         ))
 
@@ -369,7 +440,7 @@ class ReportBuilder:
             ["Model Artifacts", f"{self.model_joblibs} (.joblib + scalers + feature lists)"],
             ["Best R2", f"{best_r2:.4f} ({best_info})"],
             ["Avg Availability", f"{self.avg_availability:.2f}%"],
-            ["Output Files", f"{self.n_csv} CSV files (doc Section 15 compliant)"],
+            ["Output Files", f"{self.n_csv} CSV files (Section 15 output schema)"],
             ["API Endpoints", f"{self.n_api_endpoints} (FastAPI + Uvicorn)"],
             ["API Tests", f"{self.n_api_tests} passing tests"],
         ]
@@ -409,7 +480,7 @@ class ReportBuilder:
             "Build a 15-step automated pipeline from raw SCADA data to forecast output",
             "Create a REST API with interactive dashboard for real-time forecasting",
             "Detect ramp events, anomalies, and turbine failure risks",
-            "Produce output files compliant with Vietnamese technical specification (Section 15)",
+            "Produce output files following the project output schema (Section 15: Dinh dang file dau ra)",
             "Achieve R<super>2</super> > 0.90 at the 10-minute horizon for individual turbines",
         ]
         for obj in objectives:
@@ -874,50 +945,119 @@ class ReportBuilder:
         if farm_metrics_path.exists():
             farm_df = pd.read_csv(farm_metrics_path)
             if not farm_df.empty:
-                farm_data = [["Horizon", "Model", "MAE (kW)", "RMSE (kW)", "nRMSE%", "Bias", "R2"]]
+                has_corr = "r2_corrected" in farm_df.columns and pd.notna(farm_df["r2_corrected"]).any()
+                farm_data = [["Horizon", "Model", "MAE (kW)", "RMSE (kW)", "nRMSE%", "Bias", "R2",
+                              "R2 corr.", "Bias corr."] if has_corr else
+                             ["Horizon", "Model", "MAE (kW)", "RMSE (kW)", "nRMSE%", "Bias", "R2"]]
                 for _, row in farm_df.iterrows():
-                    farm_data.append([
+                    row_vals = [
                         row["horizon"], row["model"],
                         f"{row['mae']:.1f}", f"{row['rmse']:.1f}",
                         f"{row['nrmse_pct']:.1f}" if pd.notna(row.get("nrmse_pct")) else "-",
                         f"{row['bias']:+.1f}" if pd.notna(row.get("bias")) else "-",
                         f"{row['r2']:.4f}",
-                    ])
-                self.story.append(_make_table(farm_data, col_widths=[20 * mm, 20 * mm, 22 * mm, 22 * mm, 18 * mm, 18 * mm, 22 * mm]))
+                    ]
+                    if has_corr:
+                        row_vals += [
+                            f"{row['r2_corrected']:.4f}" if pd.notna(row.get("r2_corrected")) else "-",
+                            f"{row['bias_corrected']:+.1f}" if pd.notna(row.get("bias_corrected")) else "-",
+                        ]
+                    farm_data.append(row_vals)
+                self.story.append(_make_table(farm_data, col_widths=[16 * mm, 16 * mm, 18 * mm, 18 * mm, 15 * mm, 15 * mm, 18 * mm, 18 * mm, 18 * mm][:len(farm_data[0])]))
                 best_farm = farm_df.loc[farm_df["r2"].idxmax()]
-                worst_farm = farm_df.loc[farm_df["r2"].idxmin()]
                 self.story.append(Paragraph(
                     f"<b>Evidence:</b> Farm-level R<super>2</super> ranges from {best_farm['r2']:.4f} "
-                    f"({best_farm['horizon']}) to {worst_farm['r2']:.4f} ({worst_farm['horizon']}). "
-                    f"The 10-min farm forecast achieves R<super>2</super>={best_farm['r2']:.4f} "
-                    f"with MAE={best_farm['mae']:.0f} kW (nMAE={best_farm['nmae_pct']:.1f}%).",
+                    f"({best_farm['horizon']}). The 10-min farm forecast achieves "
+                    f"R<super>2</super>={best_farm['r2']:.4f} with MAE={best_farm['mae']:.0f} kW "
+                    f"(nMAE={best_farm['nmae_pct']:.1f}%).",
                     s["BodyText2"],
                 ))
+                if has_corr:
+                    best_corr = farm_df.loc[farm_df["r2_corrected"].idxmax()]
+                    self.story.append(Paragraph(
+                        f"<b>Bias correction (P1-04):</b> a per-model linear offset fitted on the "
+                        f"validation split (corrected = slope &times; predicted + intercept) was applied to the "
+                        f"test forecasts. Best corrected R<super>2</super>={best_corr['r2_corrected']:.4f} "
+                        f"({best_corr['horizon']}, {best_corr['model']}); raw/corrected columns are shown "
+                        f"side by side above and every corrected metric is scored on the same samples as the raw one.",
+                        s["BodyText2"],
+                    ))
 
         self.story.append(Paragraph("5.4.1  Farm Bias Analysis (P1-04)", s["SectionH3"]))
         if not self.farm_bias_df.empty:
-            bias_rows = [["Segment", "Horizon", "n", "MAE (kW)", "RMSE (kW)", "Bias (kW)", "R2"]]
+            def _fmt(v, spec):
+                try:
+                    if v is None or pd.isna(v):
+                        return "-"
+                    return f"{v:{spec}}"
+                except (ValueError, TypeError):
+                    return "-"
+
+            bias_rows = [["Horizon", "n", "Actual (kW)", "Farm model (kW)", "Bias (kW)",
+                          "Bias % rated", "MAE (kW)", "Farm vs sum (kW)"]]
             for _, row in self.farm_bias_df.iterrows():
                 bias_rows.append([
-                    str(row.get("segment", "")), str(row.get("horizon", "")),
-                    f"{int(row.get('n', 0)):,}",
-                    f"{row.get('mae', 0):.1f}",
-                    f"{row.get('rmse', 0):.1f}",
-                    f"{row.get('bias', 0):+.1f}",
-                    f"{row.get('r2', 0):.4f}",
+                    str(row.get("horizon", "")),
+                    _fmt(row.get("n_samples"), ",d"),
+                    _fmt(row.get("actual_mean_kw"), ",.0f"),
+                    _fmt(row.get("farm_model_mean_kw"), ",.0f"),
+                    _fmt(row.get("bias_kw"), "+,.1f"),
+                    _fmt(row.get("bias_pct_rated"), "+.3f"),
+                    _fmt(row.get("mae_kw"), ",.1f"),
+                    _fmt(row.get("farm_vs_sum_turbines_kw"), "+,.1f"),
                 ])
             self.story.append(Paragraph(
-                "Model bias is examined on farm-level forecasts segmented by operating regime "
-                "(wind-speed bins and calendar periods). This directly addresses the review concern "
-                "that reported skill may hide conditional under-/over-forecasting.",
+                "Model bias is examined by comparing the direct farm-total forecast with the SUM of the "
+                "12 individual turbine forecasts, and against the observed farm power (P(t+h)). A positive "
+                "bias means the farm model over-forecasts on average. This directly addresses the review "
+                "concern that reported skill may hide systematic under-/over-forecasting.",
                 s["BodyText2"],
             ))
-            self.story.append(_make_table(bias_rows, col_widths=[30 * mm, 22 * mm, 15 * mm, 20 * mm, 20 * mm, 20 * mm, 20 * mm]))
+            self.story.append(_make_table(bias_rows, col_widths=[18 * mm, 14 * mm, 22 * mm, 26 * mm, 18 * mm, 20 * mm, 18 * mm, 24 * mm]))
             self.story.append(_fig("25_farm_bias_calibration.png", w=180 * mm, h=70 * mm))
             self.story.append(self._caption("Farm-level bias vs predicted power with calibration reference (identity line)"))
         else:
             self.story.append(Paragraph(
                 "Farm bias analysis output not found — run the pipeline to generate farm_bias.csv.",
+                s["BodyText2"],
+            ))
+
+        self.story.append(Paragraph("5.4.2  Horizon Comparison Window Check (P1-04)", s["SectionH3"]))
+        win_path = CSV_DIR / "farm_horizon_window_check.csv"
+        if win_path.exists():
+            win_df = pd.read_csv(win_path)
+            if not win_df.empty:
+                pair_rows = win_df[win_df["horizon_b"] == "24hour"].copy()
+                if pair_rows.empty:
+                    pair_rows = win_df
+                win_data = [["Horizon A", "Horizon B", "n common", "Window same",
+                             "R2 A (common)", "R2 B (common)", "Delta R2"]]
+                for _, row in pair_rows.iterrows():
+                    win_data.append([
+                        row["horizon_a"], row["horizon_b"],
+                        f"{int(row['n_common_samples']):,}",
+                        "yes" if bool(row.get("window_identical", False)) else "no",
+                        f"{row['r2_a_on_common']:.4f}",
+                        f"{row['r2_b_on_common']:.4f}",
+                        f"{row['r2_b_minus_a_on_common']:+.4f}",
+                    ])
+                self.story.append(Paragraph(
+                    "To rule out a sampling artifact, R<super>2</super> for every horizon pair is "
+                    "recomputed on the <b>intersection</b> of valid target samples — i.e. the same test "
+                    "window (same timestamps) and the same n_at_capacity / n_zero_power masks. If the "
+                    "24h &gt; 6h R<super>2</super> result survives on identical samples, it is a genuine "
+                    "forecast-quality effect rather than a target-shift artifact.",
+                    s["BodyText2"],
+                ))
+                self.story.append(_make_table(win_data, col_widths=[18 * mm, 18 * mm, 18 * mm, 20 * mm, 20 * mm, 20 * mm, 18 * mm]))
+            else:
+                self.story.append(Paragraph(
+                    "farm_horizon_window_check.csv exists but is empty for this run.",
+                    s["BodyText2"],
+                ))
+        else:
+            self.story.append(Paragraph(
+                "farm_horizon_window_check.csv not found — the same-window horizon check was not generated.",
                 s["BodyText2"],
             ))
 
@@ -1224,9 +1364,9 @@ class ReportBuilder:
         self.story.append(Paragraph("7. Output Files (Doc Section 15 Compliance)", s["SectionH1"]))
         self.story.append(_section_line())
         self.story.append(Paragraph(
-            f"All {self.n_csv} output files comply with the Vietnamese technical specification Section 15 "
-            "(Dinh dang file dau ra). Each file follows the required column naming convention "
-            "with timestamp, model forecast, actual values, errors, and confidence intervals.",
+            f"All {self.n_csv} output files follow the project output schema (Section 15: Dinh dang file dau ra). "
+            "Each file uses the documented column naming convention covering timestamp, model forecast, "
+            "actual values, errors, and confidence-interval fields, as listed below.",
             s["BodyText2"],
         ))
 
@@ -1243,10 +1383,10 @@ class ReportBuilder:
             ["power_forecast.csv", "timestamp_issue, timestamp_target, turbine_id,\nhorizon_min, y_pred, y_low, y_high,\nmodel_version, forecast_quality", f"{_get_row_count('power_forecast.csv'):,}", "Per-turbine power\nforecasts with 95% CI"],
             ["farm_forecast.csv", "timestamp_issue, timestamp_target,\nhorizon_min, farm_power_pred,\nfarm_power_low, farm_power_high,\nfarm_energy_pred, forecast_quality", f"{_get_row_count('farm_forecast.csv'):,}", "Aggregated farm\npower + energy"],
             ["evaluation_metrics.csv", "target, model, horizon,\nmae, nmae_pct, rmse, nrmse_pct,\nbias, r2, max_error,\nskill_score, skill_vs_ridge,\nn_samples", f"{_get_row_count('evaluation_metrics.csv'):,}", "Detailed evaluation\nmetrics (explicit skill baselines\n+ n_samples)"],
-            ["farm_bias.csv", "segment, horizon, n,\nmae, rmse, bias, r2", f"{_get_row_count('farm_bias.csv'):,}", "Farm bias by operating\nsegment (P1-04)"],
+            ["farm_bias.csv", "horizon, n_samples,\nactual_mean_kw, farm_model_mean_kw,\nbias_kw, bias_pct_rated,\nmae_kw, farm_vs_sum_turbines_kw", f"{_get_row_count('farm_bias.csv'):,}", "Farm direct-model vs\nsum-of-turbines bias (P1-04)"],
             ["sample_trace_TB02_24hour.csv", "timestamp, features,\npersistence_pred, ridge_pred,\nml_pred, actual", f"{_get_row_count('sample_trace_TB02_24hour.csv'):,}", "End-to-end sample trace\n(leakage evidence)"],
             ["metrics.csv", "model, turbine_id, horizon,\nMAE, nMAE, RMSE, nRMSE,\nBias, R2, skill_score,\nmax_error", f"{_get_row_count('metrics.csv'):,}", "Condensed model\nperformance metrics"],
-            ["farm_metrics.csv", "target, model, horizon,\nmae, rmse, nmae_pct, nrmse_pct,\nbias, r2, max_error, level", f"{_get_row_count('farm_metrics.csv'):,}", "Farm-level metrics\n(direct on total power)"],
+            ["farm_metrics.csv", "target, model, horizon,\nmae, rmse, nmae_pct, nrmse_pct,\nbias, r2, max_error, n_samples,\nn_at_capacity, n_zero_power,\n*_corrected (bias-adjusted,\nP1-04), correction_*", f"{_get_row_count('farm_metrics.csv'):,}", "Farm-level metrics,\nraw vs bias-corrected"],
             ["data_quality_report.csv", "column, missing_rate_pct,\ninvalid_values, min, max,\nunit, remarks, definition,\ndata_source", f"{_get_row_count('data_quality_report.csv'):,}", "Column-level\ndata quality"],
             ["ramp_alert.csv", "timestamp, ramp_type,\nexpected_change, probability,\nthreshold, affected_turbines", f"{_get_row_count('ramp_alert.csv'):,}", "Ramp events\ndetected"],
             ["failure_risk.csv", "timestamp, turbine_id, component,\nhorizon, stop_risk_score,\nmethod, recommended_action", f"{_get_row_count('failure_risk.csv'):,}", "Turbine failure\nrisk assessment"],
@@ -1255,6 +1395,7 @@ class ReportBuilder:
             ["coverage_calibration.csv", "turbine_id, horizon, model,\nnominal_coverage,\nactual_coverage,\ncalibration_error", f"{_get_row_count('coverage_calibration.csv'):,}", "Conformal CI coverage\ncalibration"],
             ["alert_accuracy.csv", "turbine_id, horizon, model,\nprecision, recall, f1,\nfalse_alarm_rate, balanced_accuracy", f"{_get_row_count('alert_accuracy.csv'):,}", "Ramp detection\naccuracy metrics"],
             ["anomaly_accuracy.csv", "turbine_id, method,\nprecision, recall, f1,\nfalse_alarm_rate", f"{_get_row_count('anomaly_accuracy.csv'):,}", "Anomaly detection\naccuracy metrics"],
+            ["farm_horizon_window_check.csv", "horizon_a, horizon_b,\nn_common_samples,\nwindow_identical, window_start,\nwindow_end, r2_a_on_common,\nr2_b_on_common,\nr2_b_minus_a_on_common,\nn_at_capacity_*_common,\nn_zero_power_*_common", f"{_get_row_count('farm_horizon_window_check.csv'):,}", "Same-window horizon\nR2 comparison (P1-04)"],
         ]
         self.story.append(_make_table(output_data, col_widths=[32 * mm, 48 * mm, 15 * mm, 42 * mm]))
         self.story.append(PageBreak())
@@ -1264,7 +1405,7 @@ class ReportBuilder:
         self.story.append(Paragraph("8. Requirements Traceability Matrix", s["SectionH1"]))
         self.story.append(_section_line())
         self.story.append(Paragraph(
-            "Each requirement from the technical specification is traced to its implementation file(s), "
+            "Each project requirement (configs/compliance_matrix.csv) is traced to its implementation file(s), "
             "API endpoint, output schema, test case(s), and current test result.",
             s["BodyText2"],
         ))
@@ -1316,7 +1457,7 @@ class ReportBuilder:
         self.story.append(Paragraph("9. Source Code & Reproducible Configuration", s["SectionH1"]))
         self.story.append(_section_line())
 
-        self.story.append(Paragraph("10.1  Project Structure", s["SectionH2"]))
+        self.story.append(Paragraph("9.1  Project Structure", s["SectionH2"]))
         structure = [
             ["Directory / File", "Purpose"],
             ["src/", "16 Python modules: loading, validation, preprocessing, feature engineering, training, evaluation, audit, inventory, API, prediction"],
@@ -1325,7 +1466,7 @@ class ReportBuilder:
             ["data/raw/", "11 SCADA Excel files (raw, read-only)"],
             ["data/processed/", "Combined and preprocessed Parquet files"],
             ["data/metadata/", "JSON/CSV metadata: raw_coverage_audit, split_statistics, reindex_additions, leakage_audit, horizon_sample_counts, inventory_summary, data_manifest, walk_forward, etc."],
-            ["outputs/forecasts/", f"{self.n_csv} CSV output files (doc Section 15 compliant)"],
+            ["outputs/forecasts/", f"{self.n_csv} CSV output files (Section 15 output schema)"],
             ["outputs/figures/", "PNG validation charts incl. farm-bias calibration"],
             ["outputs/xlsx/", f"{len(list((BASE / 'outputs' / 'xlsx').glob('*.xlsx')))} converted Excel files"],
             ["tests/", "API tests + pipeline + compliance + input manager"],
@@ -1338,7 +1479,7 @@ class ReportBuilder:
         ]
         self.story.append(_make_table(structure, col_widths=[45 * mm, 95 * mm]))
 
-        self.story.append(Paragraph("10.2  Dependencies", s["SectionH2"]))
+        self.story.append(Paragraph("9.2  Dependencies", s["SectionH2"]))
         dep_data = [
             ["Package", "Version", "Purpose"],
             ["pandas", "2.3.3", "Data manipulation & time series"],
@@ -1357,7 +1498,7 @@ class ReportBuilder:
         ]
         self.story.append(_make_table(dep_data, col_widths=[30 * mm, 25 * mm, 85 * mm]))
 
-        self.story.append(Paragraph("10.3  End-to-End Reproduction", s["SectionH2"]))
+        self.story.append(Paragraph("9.3  End-to-End Reproduction", s["SectionH2"]))
         commands = [
             ["Step", "Command", "Description"],
             ["1", "pip install -r requirements.txt", "Install all dependencies"],
@@ -1398,7 +1539,8 @@ class ReportBuilder:
 
         endpoint_data = [["Method", "Endpoint", "Status"]]
         for method, path in api_endpoints:
-            endpoint_data.append([method, "/" + path if path else "/", "Tested" if path in ["", "health", "health/", "turbines", "models", "evaluations"] else "Exposed"])
+            endpoint = path if path.startswith("/") else "/" + path
+            endpoint_data.append([method, endpoint, "Tested" if path in ["", "health", "health/", "turbines", "models", "evaluations"] else "Exposed"])
 
         self.story.append(Paragraph(
             f"The API exposes {len(api_endpoints)} endpoints via FastAPI. "
@@ -1487,7 +1629,7 @@ class ReportBuilder:
                     elif "Planned" in fstatus:
                         planned.append(entry)
 
-        self.story.append(Paragraph("12.1  Implemented Features", s["SectionH2"]))
+        self.story.append(Paragraph("11.1  Implemented Features", s["SectionH2"]))
         self.story.append(Paragraph(
             f"{len(implemented)} features fully implemented and tested.",
             s["BodyText2"],
@@ -1498,7 +1640,7 @@ class ReportBuilder:
                 imp_data.append([f["id"], f["name"][:45], f["evidence"][:70]])
             self.story.append(_make_table(imp_data, col_widths=[12 * mm, 48 * mm, 80 * mm]))
 
-        self.story.append(Paragraph("12.2  Prototype / Document-only", s["SectionH2"]))
+        self.story.append(Paragraph("11.2  Prototype / Document-only", s["SectionH2"]))
         prototype += [f for f in implemented if "Document" in f["status"]]
         if prototype:
             proto_data = [["ID", "Feature", "Status"]]
@@ -1508,7 +1650,7 @@ class ReportBuilder:
         else:
             self.story.append(Paragraph("No prototypes or document-only features.", s["BodyText2"]))
 
-        self.story.append(Paragraph("12.3  Planned Features", s["SectionH2"]))
+        self.story.append(Paragraph("11.3  Planned Features", s["SectionH2"]))
         self.story.append(Paragraph(
             f"{len(planned)} features planned for future releases.",
             s["BodyText2"],
@@ -1535,18 +1677,24 @@ class ReportBuilder:
         rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
         raw_pts = rc.get("n_rows", 0)
         raw_gaps = rc.get("n_missing_timestamps", 0)
+        farm_r2_10min = "N/A"
+        if not self.farm_metrics_df.empty:
+            fm = self.farm_metrics_df[self.farm_metrics_df["horizon"] == "10min"]
+            if not fm.empty and pd.notna(fm["r2"].iloc[0]):
+                farm_r2_10min = f"{fm['r2'].iloc[0]:.4f}"
         conclusions = [
             f"Best model achieves R<super>2</super>={best_r2_str} (10-min horizon)",
             f"Average turbine R<super>2</super> at 10-min horizon: {avg_r2_10min_lgb} (LightGBM)",
             f"Performance degrades to R<super>2</super>~{avg_r2_24h_lgb} at 24-hour horizon (no NWP data)",
             "XGBoost and LightGBM show nearly identical performance (within 0.01 R<super>2</super> at all horizons)",
-            "Farm-level R<super>2</super> reaches ~0.96 at 10-min horizon (direct on summed farm power)",
+            f"Farm-level R<super>2</super> reaches {farm_r2_10min} at 10-min horizon (direct on summed farm power)",
             f"Average turbine availability: {self.avg_availability:.2f}%",
             "TB12 has ~44% missing data vs ~6-11% for other turbines, plus a high frozen-data ratio — sensor/data-quality investigation recommended",
             f"Observed raw coverage: {raw_pts:,} unique timestamps with {raw_gaps:,} missing (coverage {rc.get('coverage_ratio', 0):.2%}); "
             "10-minute reindexing adds synthetic forward-filled rows, which are tracked and disclosed (Section 3.1)",
             "Automated leakage audit confirms no trained model uses target/future columns (0 flagged); sample trace TB02/24h provides end-to-end evidence",
-            f"System generates {self.n_csv} CSV output files ({self.model_joblibs} model artifacts) implementing the Vietnamese Section 15 output format",
+            f"System generates {self.n_csv} CSV output files ({self.model_joblibs} model artifacts) following the "
+            "Section 15 output schema (column naming, forecast_quality labels, CI fields)",
             "Walk-forward validation (5 folds) confirms baseline stability",
             f"FastAPI serves {self.n_api_endpoints} endpoints with interactive web dashboard; API key authentication is fail-closed",
         ]
@@ -1559,7 +1707,7 @@ class ReportBuilder:
             "Implement direct multi-horizon models with NWP inputs for day-ahead forecasting",
             "Conduct data quality investigation and sensor calibration for TB12",
             "Deploy LSTM/Transformer models for sequence-aware temporal forecasting",
-            "Add probabilistic forecasting with quantile regression and conformal prediction",
+            "Extend conformal prediction intervals and quantile regression to the 6-hour and 24-hour horizons once NWP inputs are integrated",
             "Implement automated anomaly alerting with email/SMS notifications",
             "Build a database backend (PostgreSQL) for historical prediction storage and analysis",
             "Optimize feature engineering pipeline to reduce DataFrame fragmentation",
@@ -1646,10 +1794,11 @@ class ReportBuilder:
              "tests/test_api.py (401 missing key, 403 invalid key), logs/api_audit.log"],
             ["P3-01", "Report presentation issues (empty TOC item 8, duplicated Figure numbers, //endpoint, "
              "'fully compliant', conformal contradiction)",
-             "TOC numbering fixed (no empty item); figure captions auto-numbered so duplicates are "
-             "impossible; endpoints documented with single leading slash; 'fully compliant' replaced by "
-             "scoped statements; conclusions no longer claim conformal prediction is deployed.",
-             "generate_report.py (self._caption counter), this PDF"],
+             "TOC is now generated by a two-pass render with real page numbers (no empty "
+             "entries); figure captions auto-numbered so duplicates are impossible; endpoints documented with "
+             "single leading slash; compliance claims reworded to cite the concrete output schema (Section 15) "
+             "instead of an unqualified 'fully compliant'; conclusions no longer contradict conformal status.",
+             "generate_report.py (self._caption counter + two-pass ToC render), this PDF"],
         ]
         self.story.append(_make_table(rows, col_widths=[14 * mm, 36 * mm, 62 * mm, 38 * mm]))
 
@@ -1697,21 +1846,24 @@ def main():
     logger.info("Generating AMG Wind Farm project report PDF ...")
     OUTPUT_PDF.parent.mkdir(parents=True, exist_ok=True)
 
-    doc = SimpleDocTemplate(
-        str(OUTPUT_PDF),
-        pagesize=A4,
-        leftMargin=20 * mm,
-        rightMargin=20 * mm,
-        topMargin=25 * mm,
-        bottomMargin=25 * mm,
-        title="AMG Wind Power Forecasting Report",
-        author="AMG Wind Farm Project",
-    )
-
-    builder = ReportBuilder()
-    story = builder.build()
-
-    doc.build(story, onFirstPage=builder._add_page_number, onLaterPages=builder._add_page_number)
+    _TOC_PAGES.clear()
+    for _pass in range(4):
+        builder = ReportBuilder()
+        story = builder.build()
+        before = dict(_TOC_PAGES)
+        doc = ReportDocTemplate(
+            str(OUTPUT_PDF),
+            pagesize=A4,
+            leftMargin=20 * mm,
+            rightMargin=20 * mm,
+            topMargin=25 * mm,
+            bottomMargin=25 * mm,
+            title="AMG Wind Power Forecasting Report",
+            author="AMG Wind Farm Project",
+        )
+        doc.build(story, onFirstPage=builder._add_page_number, onLaterPages=builder._add_page_number)
+        if _TOC_PAGES == before:
+            break
 
     size_kb = OUTPUT_PDF.stat().st_size / 1024
     logger.info(f"Report saved: {OUTPUT_PDF}")
