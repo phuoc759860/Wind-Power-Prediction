@@ -1,11 +1,57 @@
 import logging
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Columns that MUST never be used as features for any forecast.
+# Target columns look like {base}_target_{horizon} and contain the FUTURE
+# value P(t+h); any model that consumes them is leaking the answer.
+NON_FEATURE_MARKERS = ["_target_", "_missing", "_status", "_is_anomaly",
+                       "_anomaly_score", "_is_stopped", "_failure_event"]
+META_COLUMNS = ["timestamp", "PCTimeStamp", "data_split", "time_index", "data_audit"]
+
+
+def base_power_col(target_col: str) -> str:
+    """TB02_power_target_10min -> TB02_power ; farm_total_power_target_1hour -> farm_total_power."""
+    if "_target_" in target_col:
+        return target_col.split("_target_")[0]
+    return target_col
+
+
+def is_feature_column(col: str, target_col: str, dtype=None) -> bool:
+    """Deterministic allow-list of columns that are safe as features at issue time t."""
+    if col == target_col:
+        return False
+    if col in META_COLUMNS:
+        return False
+    if any(marker in col for marker in NON_FEATURE_MARKERS):
+        return False
+    if dtype is not None:
+        try:
+            if not pd.api.types.is_numeric_dtype(dtype):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def select_feature_columns(df: pd.DataFrame, target_col: str) -> List[str]:
+    """Return numeric feature columns available at issue time t (no future info)."""
+    selected = []
+    for c in df.columns:
+        if is_feature_column(c, target_col, df[c].dtype):
+            selected.append(c)
+    return selected
+
+
+def _as_matrix(df: pd.DataFrame, feature_cols: List[str]):
+    valid_cols = [c for c in feature_cols if c in df.columns]
+    X = df[valid_cols].fillna(0).replace([np.inf, -np.inf], 0)
+    return X, valid_cols
 
 
 def _baseline_metrics(actual: np.ndarray, predicted: np.ndarray) -> Dict:
@@ -27,26 +73,43 @@ def _baseline_metrics(actual: np.ndarray, predicted: np.ndarray) -> Dict:
     }
 
 
-def persistence_forecast(test_data: pd.DataFrame, target_col: str, horizon_steps: int) -> np.ndarray:
-    return test_data[target_col].shift(horizon_steps).values
+def persistence_predictions(data: pd.DataFrame, target_col: str,
+                            horizon_steps: int) -> np.ndarray:
+    """Persistence forecast for the aligned supervised frame.
+
+    The row at issue time t holds target P(t+h) (created with shift(-h)).
+    The persistence forecast issued at t is therefore the current value P(t),
+    i.e. the base power column at the SAME row index t.
+    """
+    base_col = base_power_col(target_col)
+    if base_col not in data.columns:
+        logger.warning(f"Base column {base_col} not found for persistence of {target_col}")
+        return np.full(len(data), np.nan)
+    return data[base_col].to_numpy(dtype=float)
 
 
-def evaluate_persistence(test_data: pd.DataFrame, target_col: str, horizon_steps: int) -> Dict:
-    shifted = persistence_forecast(test_data, target_col, horizon_steps)
-    actual = test_data[target_col].values
-    return _baseline_metrics(actual, shifted)
+def evaluate_persistence(data: pd.DataFrame, target_col: str, horizon_steps: int) -> Dict:
+    pred = persistence_predictions(data, target_col, horizon_steps)
+    actual = data[target_col].to_numpy(dtype=float) if target_col in data.columns else np.full(len(data), np.nan)
+    return _baseline_metrics(actual, pred)
 
 
-def train_ridge_regression(train_data: pd.DataFrame, target_col: str,
-                           config: dict, alpha: float = 1.0):
-    feature_cols = [c for c in train_data.columns
-                    if c not in [target_col, "timestamp", "data_split", "time_index"]
-                    and not c.startswith("_target_")
-                    and not any(p in c for p in ["_missing", "_status"])
-                    and train_data[c].dtype in [np.float64, np.float32, np.int64, np.int32]]
-    valid_cols = [c for c in feature_cols if c in train_data.columns]
-    X = train_data[valid_cols].fillna(0).replace([np.inf, -np.inf], 0)
-    y = train_data[target_col].fillna(0)
+def train_ridge(train_data: pd.DataFrame, target_col: str, config: dict = None,
+                alpha: float = 1.0):
+    """Train Ridge to predict target P(t+h) from features available at time t only."""
+    feature_cols = select_feature_columns(train_data, target_col)
+    if not feature_cols:
+        raise ValueError(f"No features selected for target {target_col}")
+
+    X, valid_cols = _as_matrix(train_data, feature_cols)
+    y = pd.to_numeric(train_data[target_col], errors="coerce").to_numpy()
+
+    mask = y_mask = ~np.isnan(y)
+    X = X[mask]
+    y = y[mask]
+    if len(y) < 50:
+        logger.warning(f"Ridge target {target_col}: only {len(y)} valid training rows")
+
     scaler = StandardScaler()
     X_s = scaler.fit_transform(X)
     model = Ridge(alpha=alpha, random_state=42)
@@ -54,82 +117,106 @@ def train_ridge_regression(train_data: pd.DataFrame, target_col: str,
     return model, scaler, valid_cols
 
 
-def evaluate_ridge(model, scaler, feature_cols, test_data: pd.DataFrame, target_col: str) -> Dict:
-    valid_cols = [c for c in feature_cols if c in test_data.columns]
-    X = test_data[valid_cols].fillna(0).replace([np.inf, -np.inf], 0)
+def evaluate_ridge(model, scaler, feature_cols, data: pd.DataFrame, target_col: str) -> Dict:
+    X, _ = _as_matrix(data, feature_cols)
     X_s = scaler.transform(X)
     pred = model.predict(X_s)
-    actual = test_data[target_col].values
+    actual = data[target_col].to_numpy(dtype=float) if target_col in data.columns else np.full(len(data), np.nan)
     return _baseline_metrics(actual, pred)
 
 
+def ridge_predictions(model, scaler, feature_cols, data: pd.DataFrame) -> np.ndarray:
+    X, _ = _as_matrix(data, feature_cols)
+    X_s = scaler.transform(X)
+    return model.predict(X_s)
+
+
+def build_test_baseline_predictions(test_data: pd.DataFrame, ridge_models: Dict,
+                                    power_cols: list, config: dict) -> Dict:
+    """Persistence + ridge predictions on the test set, keyed by target column.
+
+    Returns {target_col: {"persistence": np.array, "ridge": np.array}}.
+    Persistence uses P(t) at the issue row; ridge uses the trained leakage-free
+    model. Both align with the supervised frame so skill scores use identical
+    samples (P0-03).
+    """
+    horizons = config.get("forecasting", {}).get("horizons", [])
+    out = {}
+    for h in horizons:
+        name, steps = h["name"], h["steps"]
+        for col in power_cols:
+            target = f"{col}_target_{name}"
+            if target not in test_data.columns:
+                continue
+            p = persistence_predictions(test_data, target, steps)
+            entry = {"persistence": p, "ridge": np.full(len(p), np.nan)}
+            if target in ridge_models:
+                model, scaler, fcols = ridge_models[target]
+                entry["ridge"] = ridge_predictions(model, scaler, fcols, test_data)
+            out[target] = entry
+    return out
+
+
 def train_baselines(train_data: pd.DataFrame, val_data: pd.DataFrame,
-                    power_cols: list, config: dict) -> Dict:
+                    power_cols: list, config: dict,
+                    return_models: bool = False):
+    """Train persistence + ridge baselines for every (turbine x horizon).
+
+    Ridge is trained once per horizon target so it predicts P(t+h), never the
+    current value P(t). No feature column contains '_target_'.
+    """
     from tqdm import tqdm
 
-    logger.info("Training baseline models...")
+    logger.info("Training baseline models (persistence + ridge, leakage-free)...")
     horizons = config.get("forecasting", {}).get("horizons", [])
     results = {}
+    ridge_models: Dict[str, Tuple] = {}
 
-    ridge_models = {}
-    for col in tqdm(power_cols, desc="Training Ridge models"):
-        fcols = _select_walk_forward_features(train_data, col)
-        X = train_data[fcols].fillna(0).replace([np.inf, -np.inf], 0)
-        y = train_data[col].fillna(0)
-        scaler = StandardScaler()
-        X_s = scaler.fit_transform(X)
-        model = Ridge(alpha=1.0, random_state=42)
-        model.fit(X_s, y)
-        ridge_models[col] = (model, scaler, fcols)
+    # Target columns per horizon, e.g. TB02_power_target_10min
+    horizon_targets: Dict[str, List[str]] = {}
+    for horizon in horizons:
+        name, steps = horizon["name"], horizon["steps"]
+        targets = [f"{col}_target_{name}" for col in power_cols]
+        horizon_targets[name] = [(t, steps) for t in targets]
 
-    for horizon in tqdm(horizons, desc="Horizons"):
-        steps = horizon["steps"]
-        name = horizon["name"]
+    for name, targets in tqdm(horizon_targets.items(), desc="Baseline horizons"):
+        for target, steps in targets:
+            if target not in train_data.columns or target not in val_data.columns:
+                logger.warning(f"Target {target} missing from data, skipping baseline")
+                continue
+            try:
+                model, scaler, fcols = train_ridge(train_data, target, config)
+            except Exception as e:
+                logger.error(f"Ridge training failed for {target}: {e}")
+                continue
 
-        for col in power_cols:
-            p_metrics = evaluate_persistence(val_data, col, steps)
-            results[f"{col}_{name}"] = {
-                "model": "persistence",
-                "horizon": name,
-                "turbine": col.replace("_power", ""),
+            ridge_models[target] = (model, scaler, fcols)
+
+            p_metrics = evaluate_persistence(val_data, target, steps)
+            r_metrics = evaluate_ridge(model, scaler, fcols, val_data, target)
+
+            base = base_power_col(target)
+            results[f"{target}_persistence"] = {
+                "model": "persistence", "horizon": name,
+                "turbine": base, "target": target,
                 **p_metrics,
             }
-
-            ridge_model, ridge_scaler, ridge_features = ridge_models[col]
-            r_metrics = evaluate_ridge(ridge_model, ridge_scaler, ridge_features, val_data, col)
-            results[f"{col}_{name}_ridge"] = {
-                "model": "ridge",
-                "horizon": name,
-                "turbine": col.replace("_power", ""),
+            results[f"{target}_ridge"] = {
+                "model": "ridge", "horizon": name,
+                "turbine": base, "target": target,
                 **r_metrics,
             }
 
-    logger.info(f"Baseline training complete: {len(results)} evaluations")
+    logger.info(f"Baseline training complete: {len(results)} evaluations, "
+                f"{len(ridge_models)} ridge models")
+    if return_models:
+        return results, ridge_models
     return results
 
 
-def _select_walk_forward_features(df: pd.DataFrame, target_col: str):
-    turbine_prefix = target_col.replace("_power", "")
-    temporal_keys = ["hour", "day", "month", "dayofweek", "dayofyear",
-                     "is_weekend", "season", "sin_", "cos_"]
-    farm_keys = ["farm_avg"]
-    selected = []
-    for c in df.columns:
-        if c == target_col:
-            continue
-        if c in ["timestamp", "data_split", "time_index"]:
-            continue
-        if c.startswith("_target_") or "_missing" in c or "_status" in c:
-            continue
-        if df[c].dtype not in [np.float64, np.float32, np.int64, np.int32]:
-            continue
-        if turbine_prefix and turbine_prefix in c:
-            selected.append(c)
-        elif any(k in c for k in temporal_keys):
-            selected.append(c)
-        elif any(k in c for k in farm_keys):
-            selected.append(c)
-    return selected
+def _select_walk_forward_features(df: pd.DataFrame, target_col: str) -> List[str]:
+    """Leakage-safe feature selection used by walk-forward baseline evaluation."""
+    return select_feature_columns(df, target_col)
 
 
 def walk_forward_baselines(df: pd.DataFrame, power_cols: list, config: dict,
@@ -140,7 +227,7 @@ def walk_forward_baselines(df: pd.DataFrame, power_cols: list, config: dict,
     folds = walk_forward_split(df, n_folds=n_folds, val_size=val_size)
     logger.info(f"Walk-forward baseline evaluation: {len(folds)} folds")
 
-    fold_results = {}
+    fold_results = []
     horizons = config.get("forecasting", {}).get("horizons", [])
 
     total_iters = len(folds) * len(horizons) * len(power_cols)
@@ -149,53 +236,55 @@ def walk_forward_baselines(df: pd.DataFrame, power_cols: list, config: dict,
     for fold_info in folds:
         fold_num = fold_info["fold"]
         train_fold = fold_info["train"].reset_index(drop=True)
-        val_fold = fold_info["val"]
-
-        ridge_models = {}
-        for col in power_cols:
-            fcols = _select_walk_forward_features(train_fold, col)
-            X = train_fold[fcols].fillna(0).replace([np.inf, -np.inf], 0)
-            y = train_fold[col].fillna(0)
-            scaler = StandardScaler()
-            X_s = scaler.fit_transform(X)
-            model = Ridge(alpha=1.0, random_state=42)
-            model.fit(X_s, y)
-            ridge_models[col] = (model, scaler, fcols)
+        val_fold = fold_info["val"].reset_index(drop=True)
 
         for horizon in horizons:
             steps = horizon["steps"]
             name = horizon["name"]
             for col in power_cols:
-                p_metrics = evaluate_persistence(val_fold, col, steps)
-                key = f"fold_{fold_num}_{col}_{name}"
-                fold_results[key] = {"model": "persistence", "horizon": name, "fold": fold_num, **p_metrics}
+                target = f"{col}_target_{name}"
+                if target not in train_fold.columns or target not in val_fold.columns:
+                    continue
+                # Persistence on the SAME validation slice
+                p_metrics = evaluate_persistence(val_fold, target, steps)
+                fold_results.append({"model": "persistence", "horizon": name,
+                                     "fold": fold_num, "turbine": col, **p_metrics})
 
-                ridge_model, ridge_scaler, ridge_features = ridge_models[col]
-                r_metrics = evaluate_ridge(ridge_model, ridge_scaler, ridge_features, val_fold, col)
-                key2 = f"fold_{fold_num}_{col}_{name}_ridge"
-                fold_results[key2] = {"model": "ridge", "horizon": name, "fold": fold_num, **r_metrics}
+                # Ridge on the SAME validation slice
+                try:
+                    model, scaler, fcols = train_ridge(train_fold, target, config)
+                    r_metrics = evaluate_ridge(model, scaler, fcols, val_fold, target)
+                    fold_results.append({"model": "ridge", "horizon": name,
+                                         "fold": fold_num, "turbine": col, **r_metrics})
+                except Exception as e:
+                    logger.error(f"Walk-forward ridge failed {target} fold {fold_num}: {e}")
 
                 progress.update(1)
 
     progress.close()
 
-    wf_summary = {}
-    baseline_names = ["persistence", "ridge"]
-    for model_name in baseline_names:
-        for horizon in config.get("forecasting", {}).get("horizons", []):
-            h = horizon["name"]
-            vals = [v["rmse"] for k, v in fold_results.items()
-                    if v["model"] == model_name and v["horizon"] == h and not np.isnan(v.get("rmse", np.nan))]
-            r2_vals = [v["r2"] for k, v in fold_results.items()
-                       if v["model"] == model_name and v["horizon"] == h and not np.isnan(v.get("r2", np.nan))]
-            if vals:
-                wf_summary[f"{model_name}_{h}"] = {
-                    "model": model_name, "horizon": h,
-                    "rmse_mean": round(float(np.mean(vals)), 2),
-                    "rmse_std": round(float(np.std(vals)), 2),
-                    "r2_mean": round(float(np.mean(r2_vals)), 4),
-                    "r2_std": round(float(np.std(r2_vals)), 4),
-                    "n_folds": len(vals),
-                }
+    fold_df = pd.DataFrame(fold_results)
 
-    return {"fold_details": fold_results, "summary": wf_summary}
+    wf_summary = {}
+    for model_name in ["persistence", "ridge"]:
+        for horizon in horizons:
+            h = horizon["name"]
+            sub = fold_df[(fold_df["model"] == model_name) & (fold_df["horizon"] == h)]
+            sub = sub.dropna(subset=["rmse"])
+            if sub.empty:
+                continue
+            wf_summary[f"{model_name}_{h}"] = {
+                "model": model_name,
+                "horizon": h,
+                "rmse_mean": round(float(sub["rmse"].mean()), 2),
+                "rmse_std": round(float(sub["rmse"].std()), 2),
+                "r2_mean": round(float(sub["r2"].mean()), 4),
+                "r2_std": round(float(sub["r2"].std()), 4),
+                # n_folds is the TRUE number of walk-forward folds (time windows).
+                "n_folds": int(fold_df["fold"].nunique()) if not fold_df.empty else 0,
+                # n_evaluations = number of turbine x fold evaluations used in the mean.
+                "n_evaluations": int(len(sub)),
+            }
+
+    return {"fold_details": fold_df.to_dict(orient="records"), "summary": wf_summary,
+            "n_folds": int(fold_df["fold"].nunique()) if not fold_df.empty else 0}

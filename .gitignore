@@ -13,6 +13,11 @@ __pycache__/
 # Logs
 logs/
 *.log
+logs_pipeline_run.txt
+
+# Virtual environment
+.venv/
+venv/
 
 # Generated outputs
 outputs/

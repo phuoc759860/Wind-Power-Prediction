@@ -126,8 +126,13 @@ training:
       - lightgbm
 
   tuning:
-    method: "random_search"
-    n_iter: 50
+    # enabled=false trains XGBoost/LightGBM with the fixed hyperparameters in
+    # models.xgboost / models.lightgbm (fast, fully reproducible).
+    # enabled=true runs a TimeSeriesSplit grid search per target (~3-4h for all
+    # models) and uses the best parameters; kept for the method chapter.
+    enabled: false
+    method: "time_series_split"
+    n_iter: 12
     cv_folds: 3
 
 # ============================================================

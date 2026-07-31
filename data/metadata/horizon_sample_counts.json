@@ -1,0 +1,98 @@
+{
+  "train": {
+    "10min": {
+      "n_rows": 218433,
+      "n_valid_targets": 217879,
+      "n_invalid_targets": 554,
+      "ratio_valid": 0.997464
+    },
+    "30min": {
+      "n_rows": 218433,
+      "n_valid_targets": 217879,
+      "n_invalid_targets": 554,
+      "ratio_valid": 0.997464
+    },
+    "1hour": {
+      "n_rows": 218433,
+      "n_valid_targets": 217879,
+      "n_invalid_targets": 554,
+      "ratio_valid": 0.997464
+    },
+    "6hour": {
+      "n_rows": 218433,
+      "n_valid_targets": 217879,
+      "n_invalid_targets": 554,
+      "ratio_valid": 0.997464
+    },
+    "24hour": {
+      "n_rows": 218433,
+      "n_valid_targets": 217879,
+      "n_invalid_targets": 554,
+      "ratio_valid": 0.997464
+    }
+  },
+  "validation": {
+    "10min": {
+      "n_rows": 46807,
+      "n_valid_targets": 45865,
+      "n_invalid_targets": 942,
+      "ratio_valid": 0.979875
+    },
+    "30min": {
+      "n_rows": 46807,
+      "n_valid_targets": 45865,
+      "n_invalid_targets": 942,
+      "ratio_valid": 0.979875
+    },
+    "1hour": {
+      "n_rows": 46807,
+      "n_valid_targets": 45865,
+      "n_invalid_targets": 942,
+      "ratio_valid": 0.979875
+    },
+    "6hour": {
+      "n_rows": 46807,
+      "n_valid_targets": 45865,
+      "n_invalid_targets": 942,
+      "ratio_valid": 0.979875
+    },
+    "24hour": {
+      "n_rows": 46807,
+      "n_valid_targets": 45865,
+      "n_invalid_targets": 942,
+      "ratio_valid": 0.979875
+    }
+  },
+  "test": {
+    "10min": {
+      "n_rows": 46808,
+      "n_valid_targets": 28051,
+      "n_invalid_targets": 18757,
+      "ratio_valid": 0.599278
+    },
+    "30min": {
+      "n_rows": 46808,
+      "n_valid_targets": 28049,
+      "n_invalid_targets": 18759,
+      "ratio_valid": 0.599235
+    },
+    "1hour": {
+      "n_rows": 46808,
+      "n_valid_targets": 28046,
+      "n_invalid_targets": 18762,
+      "ratio_valid": 0.599171
+    },
+    "6hour": {
+      "n_rows": 46808,
+      "n_valid_targets": 28016,
+      "n_invalid_targets": 18792,
+      "ratio_valid": 0.59853
+    },
+    "24hour": {
+      "n_rows": 46808,
+      "n_valid_targets": 27908,
+      "n_invalid_targets": 18900,
+      "ratio_valid": 0.596223
+    }
+  }
+}

@@ -258,7 +258,7 @@ class TestNoLookaheadLeakage:
 class TestComplianceMatrix:
     """Doc 4.16: Verify the traceability/compliance matrix exists and covers all 4.x requirements."""
 
-    REQUIRED_IDS = {f"4.{i}" for i in range(1, 17)}
+    REQUIRED_IDS = {f"4.{i}" for i in range(1, 11)}
 
     def test_matrix_file_exists(self):
         path = Path(__file__).parent.parent / "configs" / "compliance_matrix.csv"

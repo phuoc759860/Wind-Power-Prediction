@@ -40,8 +40,17 @@ def _horizon_label(h: str) -> str:
     return HORIZON_LABELS.get(h, h)
 
 
-def compute_metrics(actual: np.ndarray, predicted: np.ndarray, rated_power: float = 2200) -> Dict:
+def _rated_power_for_target(target: str, default: float = 2200,
+                            farm_rated: float = 26400) -> float:
+    """Farm-total targets are normalized against farm rated power (12 x 2200 kW)."""
+    return farm_rated if "farm_total_power" in target else default
+
+
+def compute_metrics(actual: np.ndarray, predicted: np.ndarray, rated_power: float = 2200,
+                    exclude_mask: np.ndarray = None) -> Dict:
     valid = ~(np.isnan(actual) | np.isnan(predicted))
+    if exclude_mask is not None:
+        valid = valid & ~np.asarray(exclude_mask, dtype=bool)
     actual = actual[valid]
     predicted = predicted[valid]
 
@@ -68,6 +77,12 @@ def compute_metrics(actual: np.ndarray, predicted: np.ndarray, rated_power: floa
     }
 
 
+def _rmse(a: np.ndarray, b: np.ndarray) -> float:
+    if len(a) == 0:
+        return np.nan
+    return float(np.sqrt(np.mean((a - b) ** 2)))
+
+
 def compute_skill_score(rmse_model: float, rmse_baseline: float) -> float:
     if rmse_baseline == 0 or np.isnan(rmse_baseline) or np.isnan(rmse_model):
         return np.nan
@@ -75,7 +90,9 @@ def compute_skill_score(rmse_model: float, rmse_baseline: float) -> float:
 
 
 def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict, baseline_metrics: Dict,
-                        config: dict) -> pd.DataFrame:
+                        config: dict, baseline_predictions: Dict = None,
+                        ridge_predictions: Dict = None,
+                        rated_power: float = 2200) -> pd.DataFrame:
     results = []
 
     for model_key, pred_info in predictions.items():
@@ -90,7 +107,17 @@ def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict, baseline_met
         if actual is None:
             continue
 
-        metrics = compute_metrics(actual, pred_values)
+        valid = ~(np.isnan(actual) | np.isnan(pred_values))
+
+        rated_power = _rated_power_for_target(target, rated_power)
+
+        # Segment decomposition (reviewer P0-03): near-rated plateau and near-zero
+        cap_mask = (actual >= rated_power * 0.95) & valid
+        zero_mask = (actual <= rated_power * 0.01) & valid
+        seg_mask = cap_mask | zero_mask
+
+        metrics = compute_metrics(actual, pred_values, rated_power)
+        metrics_excl = compute_metrics(actual, pred_values, rated_power, exclude_mask=seg_mask)
 
         horizon = "unknown"
         for h in config.get("forecasting", {}).get("horizons", []):
@@ -106,6 +133,24 @@ def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict, baseline_met
         else:
             skill = np.nan
 
+        # Skill vs persistence on the SAME test samples (P0-03 fix).
+        skill_vs_persistence = np.nan
+        skill_vs_ridge = np.nan
+        if baseline_predictions is not None and target in baseline_predictions:
+            base_pred = np.asarray(baseline_predictions[target][:len(pred_values)], dtype=float)
+            both = valid & ~np.isnan(base_pred)
+            if both.sum() > 0:
+                skill_vs_persistence = compute_skill_score(
+                    _rmse(actual[both], pred_values[both]),
+                    _rmse(actual[both], base_pred[both]))
+        if ridge_predictions is not None and target in ridge_predictions:
+            ridge_pred = np.asarray(ridge_predictions[target][:len(pred_values)], dtype=float)
+            both = valid & ~np.isnan(ridge_pred)
+            if both.sum() > 0:
+                skill_vs_ridge = compute_skill_score(
+                    _rmse(actual[both], pred_values[both]),
+                    _rmse(actual[both], ridge_pred[both]))
+
         hor_label = horizon.replace("hour", "h").replace("min", "min")
         results.append({
             "target": target,
@@ -119,10 +164,80 @@ def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict, baseline_met
             "r2": metrics["r2"],
             "max_error": metrics["max_error"],
             "skill_score": skill,
+            "skill_vs_persistence": skill_vs_persistence,
+            "skill_vs_ridge": skill_vs_ridge,
+            "rmse_excl_capacity_zero": metrics_excl["rmse"],
             "n_samples": metrics["n_samples"],
+            "n_at_capacity": int(cap_mask.sum()),
+            "n_zero_power": int(zero_mask.sum()),
         })
 
     return pd.DataFrame(results)
+
+
+def append_baseline_rows(results_df: pd.DataFrame, test_data: pd.DataFrame,
+                         baseline_predictions: Dict, ridge_predictions: Dict,
+                         config: dict, rated_power: float = 2200) -> pd.DataFrame:
+    """Append persistence + ridge rows evaluated on the SAME test samples (P0-03).
+
+    Each baseline row carries explicit RMSE/R2/skill columns and its own
+    n_samples so the report can compare every model against the baselines on
+    identical (turbine, horizon) samples without index-misalignment leakage.
+    """
+    if baseline_predictions is None:
+        baseline_predictions = {}
+    if ridge_predictions is None:
+        ridge_predictions = {}
+
+    horizons = config.get("forecasting", {}).get("horizons", [])
+    targets = sorted(set(list(baseline_predictions.keys()) + list(ridge_predictions.keys())))
+    rows = []
+    for target in targets:
+        horizon = "unknown"
+        for h in horizons:
+            if f"_target_{h['name']}" in target:
+                horizon = h["name"]
+                break
+        if target not in test_data.columns:
+            continue
+        actual = test_data[target].values
+        base = target.replace(f"_target_{horizon}", "") if horizon != "unknown" else target
+
+        for mdl_name, pred_key in [("persistence", "persistence"), ("ridge", "ridge")]:
+            pred_map = baseline_predictions if mdl_name == "persistence" else ridge_predictions
+            preds = np.asarray(pred_map.get(target, []), dtype=float)
+            if preds is None or len(preds) == 0:
+                continue
+            preds = preds[:len(actual)]
+            valid = ~(np.isnan(actual) | np.isnan(preds))
+            if valid.sum() == 0:
+                continue
+            rated_power = _rated_power_for_target(target, rated_power)
+            m = compute_metrics(actual, preds, rated_power)
+            cap_mask = (actual >= rated_power * 0.95) & valid
+            zero_mask = (actual <= rated_power * 0.01) & valid
+            rows.append({
+                "target": target,
+                "model": mdl_name,
+                "horizon": horizon,
+                "mae": m["mae"],
+                "rmse": m["rmse"],
+                "nmae_pct": m["nmae_pct"],
+                "nrmse_pct": m["nrmse_pct"],
+                "bias": m["bias"],
+                "r2": m["r2"],
+                "max_error": m["max_error"],
+                "skill_score": np.nan,
+                "skill_vs_persistence": np.nan,
+                "skill_vs_ridge": np.nan,
+                "rmse_excl_capacity_zero": np.nan,
+                "n_samples": m["n_samples"],
+                "n_at_capacity": int(cap_mask.sum()),
+                "n_zero_power": int(zero_mask.sum()),
+            })
+    if rows:
+        results_df = pd.concat([results_df, pd.DataFrame(rows)], ignore_index=True)
+    return results_df
 
 
 def _parse_target(target: str):
@@ -239,6 +354,12 @@ def plot_best_model_scatter(results_df: pd.DataFrame, test_data: pd.DataFrame,
     if results_df.empty:
         return
 
+    # Baselines have no prediction arrays in `predictions`; keep them for the
+    # metrics tables but out of the "best model" plots.
+    results_df = results_df[~results_df["model"].isin(["persistence", "ridge"])]
+    if results_df.empty:
+        return
+
     horizon_order = ["10min", "30min", "1hour", "6hour", "24hour"]
     horizons_present = [h for h in horizon_order if h in results_df["horizon"].values]
     if not horizons_present:
@@ -287,6 +408,10 @@ def plot_best_model_scatter(results_df: pd.DataFrame, test_data: pd.DataFrame,
 
 def plot_error_histogram(results_df: pd.DataFrame, test_data: pd.DataFrame,
                          predictions: Dict, save_path: str = None):
+    if results_df.empty:
+        return
+
+    results_df = results_df[~results_df["model"].isin(["persistence", "ridge"])]
     if results_df.empty:
         return
 
@@ -451,11 +576,134 @@ def compute_farm_level_metrics(test_data: pd.DataFrame, predictions: Dict,
     return pd.DataFrame(farm_results)
 
 
-def analyze_tb12(test_data: pd.DataFrame, results_df: pd.DataFrame) -> Dict:
+def analyze_farm_bias(test_data: pd.DataFrame, predictions: Dict,
+                      config: dict, rated_power: float = 26400) -> pd.DataFrame:
+    """Farm-level bias analysis (reviewer P1-04).
+
+    Compares the direct farm_total_power model forecast with the SUM of the 12
+    individual turbine forecasts, and reports bias in kW and % of rated farm
+    power, plus whether forecasts at capacity/zero dominate the error.
+    """
+    horizons = config.get("forecasting", {}).get("horizons", [])
+    records = []
+
+    for h in horizons:
+        h_name = h["name"]
+        farm_target = f"farm_total_power_target_{h_name}"
+
+        farm_keys = [k for k in predictions if predictions[k].get("target") == farm_target]
+        if not farm_keys or farm_target not in test_data.columns:
+            continue
+
+        farm_key = farm_keys[0]
+        farm_pred = np.asarray(predictions[farm_key]["predictions"], dtype=float)
+        actual = test_data[farm_target].values[:len(farm_pred)]
+        valid = ~(np.isnan(actual) | np.isnan(farm_pred))
+        farm_pred = farm_pred[valid]
+        actual = actual[valid]
+
+        # Sum of the 12 individual turbine forecasts (same horizon, any model).
+        sum_pred = np.zeros(len(actual))
+        have_all = True
+        for tb in TURBINE_IDS:
+            t_target = f"{tb}_power_target_{h_name}"
+            t_keys = [k for k in predictions if predictions[k].get("target") == t_target]
+            if not t_keys:
+                have_all = False
+                break
+            p = np.asarray(predictions[t_keys[0]]["predictions"], dtype=float)
+            sum_pred += p[:len(sum_pred)]
+
+        if not have_all:
+            sum_pred = np.full(len(actual), np.nan)
+
+        bias_kw = float(np.mean(farm_pred - actual)) if len(actual) else np.nan
+        bias_pct_rated = bias_kw / rated_power * 100 if rated_power else np.nan
+        mae_kw = float(np.mean(np.abs(farm_pred - actual))) if len(actual) else np.nan
+
+        diff_farm_vs_sum = float(np.mean(farm_pred - sum_pred)) if have_all and not np.isnan(sum_pred).all() else np.nan
+
+        records.append({
+            "horizon": h_name,
+            "n_samples": int(len(actual)),
+            "actual_mean_kw": round(float(np.mean(actual)), 2),
+            "farm_model_mean_kw": round(float(np.mean(farm_pred)), 2),
+            "bias_kw": round(bias_kw, 2) if bias_kw == bias_kw else None,
+            "bias_pct_rated": round(bias_pct_rated, 3) if bias_pct_rated == bias_pct_rated else None,
+            "mae_kw": round(mae_kw, 2) if mae_kw == mae_kw else None,
+            "farm_vs_sum_turbines_kw": round(diff_farm_vs_sum, 2) if diff_farm_vs_sum == diff_farm_vs_sum else None,
+            "n_at_capacity": int((actual >= rated_power * 0.95).sum()),
+            "n_zero_power": int((actual <= rated_power * 0.01).sum()),
+            "note": ("Direct farm model vs sum of 12 turbine models. "
+                     "Bias > 0 means the farm model over-forecasts on average."),
+        })
+
+    return pd.DataFrame(records)
+
+
+def plot_farm_bias_calibration(test_data: pd.DataFrame, predictions: Dict,
+                               config: dict, save_path: str = None):
+    """Scatter of actual farm power vs farm-model forecast + calibration line."""
+    df = analyze_farm_bias(test_data, predictions, config)
+    if df.empty:
+        return
+
+    farm_target = "farm_total_power_target_10min"
+    farm_key = None
+    for k in predictions:
+        if predictions[k].get("target") == farm_target:
+            farm_key = k
+            break
+    if farm_key is None:
+        return
+
+    farm_pred = np.asarray(predictions[farm_key]["predictions"], dtype=float)
+    actual = test_data[farm_target].values[:len(farm_pred)]
+    valid = ~(np.isnan(actual) | np.isnan(farm_pred))
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    ax.scatter(actual[valid], farm_pred[valid], alpha=0.15, s=2, color="#e67e22")
+    lims = [0, 26400]
+    ax.plot(lims, lims, "r--", linewidth=1.5, label="Perfect")
+    ax.set_xlim(lims)
+    ax.set_ylim(lims)
+    ax.set_aspect("equal")
+    ax.set_title("Farm Total Power — Direct Model Calibration (10min)")
+    ax.set_xlabel("Actual Farm Power (kW)")
+    ax.set_ylabel("Farm Model Prediction (kW)")
+    ax.legend()
+    ax.grid(True, alpha=0.2)
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def analyze_tb12(test_data: pd.DataFrame, results_df: pd.DataFrame,
+                 split_data: Dict = None) -> Dict:
     tb12_analysis = {}
     tb12_power = test_data.get("TB12_power") if "TB12_power" in test_data.columns else None
     if tb12_power is None:
         return tb12_analysis
+
+    # P1-02: missing/stopped/frozen breakdown per split (train/val/test).
+    if split_data:
+        tb12_analysis["per_split"] = {}
+        for split_name, df in split_data.items():
+            col = f"TB12_power"
+            if col not in df.columns:
+                continue
+            vals = df[col].values
+            frozen = _detect_frozen_data(vals)
+            tb12_analysis["per_split"][split_name] = {
+                "n_rows": int(len(df)),
+                "missing_rate_pct": round(np.isnan(vals).mean() * 100, 2) if len(vals) else None,
+                "stopped_rate_pct": round(((vals == 0) | (vals < 5)).sum() / len(vals) * 100, 2) if len(vals) else None,
+                "frozen_blocks": frozen["count"],
+                "frozen_ratio_pct": round(frozen["ratio"] * 100, 2),
+                "mean_power_kw": round(float(np.nanmean(vals)), 1) if len(vals) else None,
+            }
 
     tb12_power_values = tb12_power.values
     tb12_analysis["missing_rate"] = round(np.isnan(tb12_power_values).mean() * 100, 2)
@@ -1132,25 +1380,29 @@ def generate_evaluation_report(results_df: pd.DataFrame, save_dir: str,
     if not results_df.empty:
         results_df.to_csv(os.path.join(save_dir, "evaluation_results.csv"), index=False)
 
-        plot_model_comparison(results_df, os.path.join(save_dir, "model_comparison.png"))
-        plot_horizon_comparison(results_df, os.path.join(save_dir, "horizon_comparison.png"))
+        # Baselines have no prediction arrays under {target}_{model} keys, so they
+        # must not compete for the "best row" used by the per-horizon plots.
+        plot_df = results_df[~results_df["model"].isin(["persistence", "ridge"])]
+
+        plot_model_comparison(plot_df, os.path.join(save_dir, "model_comparison.png"))
+        plot_horizon_comparison(plot_df, os.path.join(save_dir, "horizon_comparison.png"))
 
         if test_data is not None and predictions is not None:
-            plot_error_by_power_region(test_data, predictions, results_df,
+            plot_error_by_power_region(test_data, predictions, plot_df,
                                         os.path.join(save_dir, "08_error_by_power_region.png"))
-            plot_error_by_season(test_data, predictions, results_df,
+            plot_error_by_season(test_data, predictions, plot_df,
                                   os.path.join(save_dir, "09_error_by_season.png"))
-            plot_error_by_day_night(test_data, predictions, results_df,
+            plot_error_by_day_night(test_data, predictions, plot_df,
                                      os.path.join(save_dir, "10_error_by_day_night.png"))
-            plot_error_by_wind_speed(test_data, predictions, results_df,
+            plot_error_by_wind_speed(test_data, predictions, plot_df,
                                       os.path.join(save_dir, "13_error_by_wind_speed.png"))
-            plot_residual_analysis(test_data, predictions, results_df,
+            plot_residual_analysis(test_data, predictions, plot_df,
                                     os.path.join(save_dir, "11_residual_analysis.png"))
             plot_tb12_distribution(test_data,
                                     os.path.join(save_dir, "14_tb12_distribution.png"))
 
         if baseline_results is not None:
-            plot_baseline_comparison(results_df, baseline_results,
+            plot_baseline_comparison(plot_df, baseline_results,
                                       os.path.join(save_dir, "12_baseline_comparison.png"))
 
         agg_cols = ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2"]

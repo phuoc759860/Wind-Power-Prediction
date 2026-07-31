@@ -1,5 +1,6 @@
 import logging
 import math
+import json
 import numpy as np
 import pandas as pd
 import yaml
@@ -231,7 +232,13 @@ def generate_metrics():
             "Bias": round(row.get("bias", 0), 4),
             "R2": round(row.get("r2", 0), 4),
             "max_error": round(row.get("max_error", 0), 4),
-            "skill_score": round(row.get("skill_score", 0), 4),
+            "skill_score": round(row.get("skill_vs_persistence", np.nan), 4),
+            "skill_vs_persistence": round(row.get("skill_vs_persistence", np.nan), 4),
+            "skill_vs_ridge": round(row.get("skill_vs_ridge", np.nan), 4),
+            "rmse_excl_capacity_zero": round(row.get("rmse_excl_capacity_zero", np.nan), 4),
+            "n_samples": row.get("n_samples", ""),
+            "n_at_capacity": row.get("n_at_capacity", ""),
+            "n_zero_power": row.get("n_zero_power", ""),
         })
 
     out = pd.DataFrame(records)
@@ -367,11 +374,14 @@ def generate_ramp_alert(test_df):
                     "probability": round(min(1.0, abs(rate) / 0.5), 4),
                     "threshold": ramp_threshold_mw_per_min,
                     "affected_turbines": tb,
+                    "method": "heuristic_screening",
+                    "confirmed": False,
+                    "verification_status": "SCREENING_ONLY",
                 })
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "ramp_alert.csv", index=False)
-    logger.info(f"  ramp_alert.csv: {df.shape[0]} rows")
+    logger.info(f"  ramp_alert.csv: {df.shape[0]} rows (heuristic screening, not confirmed events)")
 
 
 def generate_anomaly_alert(test_df):
@@ -422,11 +432,14 @@ def generate_anomaly_alert(test_df):
                     "anomaly_score": anomaly_score,
                     "suspected_component": "power_output",
                     "evidence": evidence,
+                    "method": "heuristic_screening",
+                    "confirmed": False,
+                    "verification_status": "SCREENING_ONLY",
                 })
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "anomaly_alert.csv", index=False)
-    logger.info(f"  anomaly_alert.csv: {df.shape[0]} rows")
+    logger.info(f"  anomaly_alert.csv: {df.shape[0]} rows (heuristic screening, not confirmed faults)")
 
 
 def generate_temperature_warning(test_df):
@@ -499,8 +512,12 @@ def generate_temperature_warning(test_df):
                              "message": f"Sustained high temperature: {temp_val}°C for {SUSTAINED_WINDOW} consecutive readings (≥{SUSTAINED_HIGH}°C)"})
 
     df = pd.DataFrame(rows)
+    if not df.empty:
+        df["method"] = "heuristic_screening"
+        df["confirmed"] = False
+        df["verification_status"] = "SCREENING_ONLY"
     df.to_csv(OUT / "temperature_warning.csv", index=False)
-    logger.info(f"  temperature_warning.csv: {df.shape[0]} rows")
+    logger.info(f"  temperature_warning.csv: {df.shape[0]} rows (heuristic screening, not confirmed faults)")
 
 
 def generate_figures():
@@ -634,6 +651,43 @@ def generate_figures():
     logger.info(f"  {len(list(fig_dir.glob('*.png')))} figures saved to {fig_dir}")
 
 
+def _count_csv_rows(p: Path) -> int:
+    try:
+        return sum(1 for _ in open(p, "r", encoding="utf-8")) - 1
+    except Exception:
+        return 0
+
+
+def generate_screening_summary():
+    """Write alert_screening_summary.json (reviewer P1-05).
+
+    Explicitly states that ramp/anomaly/temperature/failure outputs are
+    HEURISTIC SCREENING flags — not confirmed fault predictions — until an
+    operator verifies each flagged timestamp against O&M records.
+    """
+    logger.info("Writing alert_screening_summary.json ...")
+    summary = {
+        "scope": "All ramp/anomaly/temperature/failure outputs on the TEST window",
+        "status": "SCREENING_ONLY",
+        "statement": ("These files list timestamps flagged by simple heuristics "
+                      "(thresholds on power deltas, z-scores, temperature limits, "
+                      "repeated stops). They are NOT confirmed fault/event "
+                      "forecasts; each flag requires operator verification against "
+                      "O&M logs before being treated as an event."),
+        "confirmed_by_operator": False,
+        "reviewer_note": "P1-05: renamed from 'fault forecast' to heuristic screening",
+    }
+    counts = {}
+    for name in ["ramp_alert", "anomaly_alert", "temperature_warning", "failure_risk"]:
+        p = OUT / f"{name}.csv"
+        if p.exists():
+            counts[name] = {"n_rows": int(_count_csv_rows(p)), "heuristic": True}
+    summary["file_counts"] = counts
+    (BASE / "data" / "metadata").mkdir(parents=True, exist_ok=True)
+    with open(BASE / "data" / "metadata" / "alert_screening_summary.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
+
+
 def convert_csv_to_xlsx():
     """Convert all CSVs in outputs/forecasts/ to XLSX in outputs/xlsx/"""
     logger.info("Converting CSVs to XLSX ...")
@@ -680,8 +734,10 @@ def generate_failure_risk(test_df):
                         "component": "general",
                         "horizon": "24hour",
                         "stop_risk_score": risk_score,
-                        "method": "heuristic (stop-count based, not validated against failure labels)",
-                        "recommended_action": "Inspect turbine - repeated stops detected",
+                        "method": "heuristic_screening",
+                        "confirmed": False,
+                        "verification_status": "SCREENING_ONLY",
+                        "recommended_action": "Inspect turbine - repeated stops detected (heuristic flag, requires operator confirmation)",
                     })
             else:
                 stop_count = 0

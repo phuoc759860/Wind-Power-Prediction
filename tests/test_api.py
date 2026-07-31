@@ -1,14 +1,19 @@
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# API key must come from the environment (no default key exists in the codebase).
+# Fail-closed: if absent, protected endpoints return 503.
+os.environ.setdefault("API_KEY", "amg-wind-2024-test")
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from src.api import app
 
-API_KEY = "amg-wind-2024-dev"
+API_KEY = os.environ["API_KEY"]
 HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 
@@ -80,6 +85,28 @@ def test_predict_lightgbm(client):
         assert p["predicted_power_kw"] <= p["confidence_upper_kw"]
 
 
+def test_predict_missing_auth(client):
+    r = client.post("/predict", json={
+        "turbine_id": "TB01",
+        "wind_speed": 8.0,
+        "temperature": 20.0,
+        "frequency": 50.0,
+        "power": 1000,
+    })
+    assert r.status_code == 401
+
+
+def test_predict_invalid_key(client):
+    r = client.post("/predict", json={
+        "turbine_id": "TB01",
+        "wind_speed": 8.0,
+        "temperature": 20.0,
+        "frequency": 50.0,
+        "power": 1000,
+    }, headers={"Authorization": "Bearer wrong-key"})
+    assert r.status_code == 403
+
+
 def test_predict_xgboost(client):
     r = client.post("/predict", json={
         "turbine_id": "TB05",
@@ -107,12 +134,12 @@ def test_predict_invalid_turbine(client):
 
 
 def test_evaluations(client):
-    r = client.get("/evaluations")
+    r = client.get("/evaluations", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_metrics(client):
-    r = client.get("/outputs/metrics")
+    r = client.get("/outputs/metrics", headers=HEADERS)
     assert r.status_code in (200, 404)
     if r.status_code == 200:
         data = r.json()
@@ -120,47 +147,47 @@ def test_metrics(client):
 
 
 def test_power_forecast(client):
-    r = client.get("/outputs/power-forecast?limit=5")
+    r = client.get("/outputs/power-forecast?limit=5", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_farm_forecast(client):
-    r = client.get("/outputs/farm-forecast?limit=5")
+    r = client.get("/outputs/farm-forecast?limit=5", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_data_quality(client):
-    r = client.get("/outputs/data-quality")
+    r = client.get("/outputs/data-quality", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_ramp_alerts(client):
-    r = client.get("/outputs/ramp-alerts?limit=5")
+    r = client.get("/outputs/ramp-alerts?limit=5", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_alert_accuracy(client):
-    r = client.get("/outputs/alert-accuracy?limit=5")
+    r = client.get("/outputs/alert-accuracy?limit=5", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_anomaly_accuracy(client):
-    r = client.get("/outputs/anomaly-accuracy?limit=5")
+    r = client.get("/outputs/anomaly-accuracy?limit=5", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_failure_risk(client):
-    r = client.get("/outputs/failure-risk?limit=5")
+    r = client.get("/outputs/failure-risk?limit=5", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_download(client):
-    r = client.get("/download/metrics.csv")
+    r = client.get("/download/metrics.csv", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
 def test_download_blocked(client):
-    r = client.get("/download/../../etc/passwd")
+    r = client.get("/download/../../etc/passwd", headers=HEADERS)
     assert r.status_code in (400, 404)
 
 
@@ -170,21 +197,21 @@ def test_download_blocked(client):
 
 
 def test_input_list(client):
-    r = client.get("/inputs")
+    r = client.get("/inputs", headers=HEADERS)
     assert r.status_code == 200
     data = r.json()
     assert isinstance(data, list)
 
 
 def test_input_summary(client):
-    r = client.get("/inputs/summary")
+    r = client.get("/inputs/summary", headers=HEADERS)
     assert r.status_code == 200
     data = r.json()
     assert "total_files" in data
 
 
 def test_input_data(client):
-    r = client.get("/inputs/data?nrows=5")
+    r = client.get("/inputs/data?nrows=5", headers=HEADERS)
     assert r.status_code in (200, 404)
 
 
@@ -197,17 +224,18 @@ def test_upload_and_delete_input(tmp_path, client):
     }).to_csv(src, index=False)
 
     with open(src, "rb") as f:
-        r = client.post("/inputs/upload", files={"file": ("temp_test.csv", f, "text/csv")})
+        r = client.post("/inputs/upload", files={"file": ("temp_test.csv", f, "text/csv")},
+                        headers=HEADERS)
     assert r.status_code == 200
     data = r.json()
     assert data["filename"] == "temp_test.csv"
     assert data["status"] == "uploaded"
 
-    r = client.get("/inputs")
+    r = client.get("/inputs", headers=HEADERS)
     filenames = [f["filename"] for f in r.json()]
     assert "temp_test.csv" in filenames
 
-    r = client.delete("/inputs/temp_test.csv")
+    r = client.delete("/inputs/temp_test.csv", headers=HEADERS)
     assert r.status_code == 200
     assert r.json()["status"] == "removed"
 
@@ -216,6 +244,7 @@ def test_upload_unsupported_format(tmp_path, client):
     src = tmp_path / "test.txt"
     src.write_text("hello world")
     with open(src, "rb") as f:
-        r = client.post("/inputs/upload", files={"file": ("test.txt", f, "text/plain")})
+        r = client.post("/inputs/upload", files={"file": ("test.txt", f, "text/plain")},
+                        headers=HEADERS)
     assert r.status_code == 400
     assert "Unsupported" in r.text

@@ -96,6 +96,26 @@ def train_linear_reg(X_train: np.ndarray, y_train: np.ndarray, config: dict = No
     return model
 
 
+def _model_trainers(config: dict) -> Dict:
+    """Select trainers per config.
+
+    When training.tuning.enabled is false (default) XGBoost/LightGBM are trained
+    directly with the fixed hyperparameters from models.xgboost / models.lightgbm
+    (fast, fully reproducible). When enabled, a TimeSeriesSplit grid search is
+    run per target and the best parameters are used.
+    """
+    tuning = config.get("training", {}).get("tuning", {})
+    if tuning.get("enabled", False):
+        return dict(MODEL_TRAINERS)
+    fast = {
+        "xgboost": train_xgboost,
+        "lightgbm": train_lightgbm,
+        "random_forest": train_random_forest,
+        "linear_regression": train_linear_reg,
+    }
+    return {name: fast.get(name, MODEL_TRAINERS.get(name)) for name in MODEL_TRAINERS}
+
+
 def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
                        target_col: str, config: dict) -> Tuple[Dict, Dict]:
     logger.info(f"Training power models for: {target_col}")
@@ -117,14 +137,16 @@ def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
     results = {}
     trained_models = {}
 
+    trainers = _model_trainers(config)
+
     for model_name in ml_models:
-        if model_name not in MODEL_TRAINERS:
+        if model_name not in trainers:
             logger.warning(f"Unknown model: {model_name}, skipping")
             continue
 
         logger.info(f"  Training {model_name}...")
         try:
-            trainer = MODEL_TRAINERS[model_name]
+            trainer = trainers[model_name]
             model = trainer(X_train_s, y_train.values, config,
                             X_val=X_val_s, y_val=y_val.values, feature_cols=feature_cols)
 

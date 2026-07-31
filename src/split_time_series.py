@@ -34,6 +34,12 @@ def split_by_time(df: pd.DataFrame, timestamp_col: str = "timestamp",
 
 def get_split_statistics(train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFrame,
                          timestamp_col: str = "timestamp", interval_minutes: int = 10) -> dict:
+    """Coverage statistics computed on the OBSERVED timestamps only.
+
+    The raw source files have gaps, so expected_steps is derived from the
+    observed min/max, and n_missing_timestamps reports the true holes.
+    These numbers are NOT inflated by any padding that happened upstream.
+    """
     stats = {}
     all_combined = pd.concat([train, val, test]).sort_values(timestamp_col).reset_index(drop=True)
 
@@ -42,19 +48,24 @@ def get_split_statistics(train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFr
             continue
         ts = pd.to_datetime(split[timestamp_col])
         start, end = ts.min(), ts.max()
+        n_rows = len(split)
+        n_duplicates = int(split.duplicated(subset=[timestamp_col]).sum())
+        ts_unique = ts.drop_duplicates()
+        n_unique = len(ts_unique)
+
         expected_steps = int((end - start).total_seconds() / 60 / interval_minutes) + 1
-        actual_steps = len(split)
-        n_duplicates = split.duplicated(subset=[timestamp_col]).sum()
+        n_missing = max(0, expected_steps - n_unique)
 
         stats[name] = {
-            "rows": actual_steps,
+            "rows": n_rows,
             "timestamp_start": str(start),
             "timestamp_end": str(end),
             "expected_steps": expected_steps,
-            "actual_steps": actual_steps,
-            "step_diff": actual_steps - expected_steps,
-            "n_duplicate_timestamps": int(n_duplicates),
-            "n_missing_timestamps": max(0, expected_steps - actual_steps + n_duplicates),
+            "actual_steps": n_unique,
+            "unique_timestamps": n_unique,
+            "n_duplicate_timestamps": n_duplicates,
+            "n_missing_timestamps": n_missing,
+            "coverage_ratio": round(n_unique / expected_steps, 6) if expected_steps else None,
             "timezone": str(ts.dt.tz) if ts.dt.tz is not None else "None (naive)",
         }
 
@@ -64,6 +75,36 @@ def get_split_statistics(train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFr
             stats[name]["total_energy_mwh"] = round(split[power_cols].mean().sum() * interval_minutes / 60000, 2)
 
     return stats
+
+
+def horizon_sample_counts(train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFrame,
+                          config: dict) -> dict:
+    """Per-horizon number of rows with a VALID (non-NaN) target P(t+h).
+
+    A row whose target is NaN cannot be used to train or score that horizon.
+    Rows close to the end of the data always have NaN targets for long horizons,
+    so the effective sample count per split is horizon-dependent. This is the
+    honest denominator that must drive reported metrics.
+    """
+    horizons = config.get("forecasting", {}).get("horizons", [])
+    power_cols = [c for c in test.columns if c.endswith("_power") and "target" not in c and "lag" not in c]
+
+    counts = {}
+    for split_name, split in [("train", train), ("validation", val), ("test", test)]:
+        per_split = {}
+        for h in horizons:
+            name = h["name"]
+            targets = [f"{c}_target_{name}" for c in power_cols if f"{c}_target_{name}" in split.columns]
+            if not targets:
+                continue
+            per_split[name] = {
+                "n_rows": int(len(split)),
+                "n_valid_targets": int(split[targets[0]].notna().sum()),
+                "n_invalid_targets": int(split[targets[0]].isna().sum()),
+                "ratio_valid": round(float(split[targets[0]].notna().mean()), 6),
+            }
+        counts[split_name] = per_split
+    return counts
 
 
 def add_time_index(df: pd.DataFrame, timestamp_col: str = "timestamp") -> pd.DataFrame:

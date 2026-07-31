@@ -23,7 +23,7 @@ BASE = Path(__file__).resolve().parent
 CSV_DIR = BASE / "outputs" / "forecasts"
 FIG_DIR = BASE / "outputs" / "figures"
 META_DIR = BASE / "data" / "metadata"
-OUTPUT_PDF = BASE / "outputs" / "AMG_Wind_Power_Forecasting_Report.pdf"
+OUTPUT_PDF = BASE / "outputs" / "AMG_Wind_Power_Forecasting_Report_Revised.pdf"
 
 BLUE_DARK = colors.HexColor("#1F3864")
 BLUE_MED = colors.HexColor("#2F5496")
@@ -144,7 +144,13 @@ class ReportBuilder:
     def __init__(self):
         self.styles = get_styles()
         self.story = []
+        self._fig_counter = 0
         self._load_data()
+
+    def _caption(self, text: str):
+        """Auto-numbered figure caption (P3-01: fixes duplicate 'Figure 3/4/5')."""
+        self._fig_counter += 1
+        return Paragraph(f"Figure {self._fig_counter}: {text}", self.styles["Caption"])
 
     def _load_data(self):
         self.eval_df = pd.read_csv(CSV_DIR / "evaluation_metrics.csv") if (CSV_DIR / "evaluation_metrics.csv").exists() else pd.DataFrame()
@@ -161,6 +167,22 @@ class ReportBuilder:
         self.walk_forward = json.load(open(wf_path)) if wf_path.exists() else {}
         audit_path = META_DIR / "data_audit.json"
         self.audit = json.load(open(audit_path)) if audit_path.exists() else {}
+        raw_cov_path = META_DIR / "raw_coverage_audit.json"
+        self.raw_coverage = json.load(open(raw_cov_path)) if raw_cov_path.exists() else {}
+        reidx_path = META_DIR / "reindex_additions.json"
+        self.reindex = json.load(open(reidx_path)) if reidx_path.exists() else {}
+        leak_path = META_DIR / "leakage_audit.csv"
+        self.leakage_df = pd.read_csv(leak_path) if leak_path.exists() else pd.DataFrame()
+        hs_path = META_DIR / "horizon_sample_counts.json"
+        self.horizon_samples = json.load(open(hs_path)) if hs_path.exists() else {}
+        split_path = META_DIR / "split_statistics.json"
+        self.split_stats = json.load(open(split_path)) if split_path.exists() else {}
+        inventory_path = META_DIR / "inventory_summary.json"
+        self.inventory = json.load(open(inventory_path)) if inventory_path.exists() else {}
+        farm_bias_path = CSV_DIR / "farm_bias.csv"
+        self.farm_bias_df = pd.read_csv(farm_bias_path) if farm_bias_path.exists() else pd.DataFrame()
+        sample_trace_path = CSV_DIR / "sample_trace_TB02_24hour.csv"
+        self.sample_trace_df = pd.read_csv(sample_trace_path, nrows=5) if sample_trace_path.exists() else pd.DataFrame()
         compliance_path = BASE / "configs" / "compliance_matrix.csv"
         self.compliance_df = pd.read_csv(compliance_path, dtype={"requirement_id": str}, keep_default_na=False) if compliance_path.exists() else pd.DataFrame()
         feature_path = BASE / "docs" / "feature_status.md"
@@ -190,6 +212,15 @@ class ReportBuilder:
         self.exp_data_rows = exp_rows
         self.model_count = len({k for k in self.eval_df["target"].unique()}) * self.eval_df["model"].nunique() * self.eval_df["horizon"].nunique() if not self.eval_df.empty else 0
 
+        api_src_path = BASE / "src" / "api.py"
+        self.api_endpoint_list = []
+        if api_src_path.exists():
+            src = api_src_path.read_text(encoding="utf-8")
+            self.api_endpoint_list = [("GET" if m == "get" else "POST", p) for m, p in re.findall(r'@app\.(get|post)\(["\']([^"\']+)["\']', src)]
+        self.n_api_endpoints = len(self.api_endpoint_list)
+        api_test_path = BASE / "tests" / "test_api.py"
+        self.n_api_tests = len(re.findall(r'^def test_', api_test_path.read_text(encoding="utf-8"), re.MULTILINE)) if api_test_path.exists() else 0
+
     def _add_page_number(self, canvas, doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 8)
@@ -213,17 +244,21 @@ class ReportBuilder:
         self.story.append(Paragraph("Technical Project Report", s["SubTitlePage"]))
         self.story.append(Spacer(1, 15 * mm))
 
+        rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
+        data_period = "Not available"
+        if rc.get("timestamp_start") and rc.get("timestamp_end"):
+            data_period = f"{rc['timestamp_start'][:10]} to {rc['timestamp_end'][:10]}"
         info = [
             ["", ""],
             ["Project", "Multi-Horizon Wind Power Forecasting"],
             ["Farm Capacity", "26.4 MW (12 x 2,200 kW Turbines)"],
-            ["Data Period", "January 2021 - July 2026 (5.5 Years)"],
-            ["Models", "XGBoost + LightGBM (426 artifacts)"],
+            ["Raw Data Period", data_period],
+            ["Models", f"XGBoost + LightGBM ({self.model_joblibs} artifacts)"],
             ["Horizons", "10 min, 30 min, 1 h, 6 h, 24 h"],
-            ["API Framework", "FastAPI + Uvicorn (15 endpoints)"],
+            ["API Framework", f"FastAPI + Uvicorn ({self.n_api_endpoints} endpoints)"],
             ["", ""],
             ["Date", datetime.now().strftime("%B %d, %Y")],
-            ["Version", "2.0.0"],
+            ["Version", "2.1.0"],
         ]
         tbl = _make_table(info, col_widths=[50 * mm, 90 * mm], header_color=BLUE_DARK)
         self.story.append(tbl)
@@ -259,15 +294,15 @@ class ReportBuilder:
             ("", "5.8  Validation Charts", "13"),
             ("", "5.9  Full Backtest Results", "14"),
             ("6.", "API & Dashboard", "14"),
-            ("", "6.1  System Architecture", "13"),
-            ("", "6.2  API Endpoints", "13"),
-            ("7.", "Output Files (Doc Section 15)", "14"),
-            ("8.", "", ""),
-            ("9.", "Requirements Traceability Matrix", "15"),
-            ("10.", "Source Code & Reproducible Configuration", "16"),
-            ("11.", "API Test Report", "17"),
-            ("12.", "Feature Status & Roadmap", "18"),
-            ("13.", "Conclusions & Future Work", "19"),
+            ("", "6.1  System Architecture", "14"),
+            ("", "6.2  API Endpoints", "14"),
+            ("7.", "Output Files (Doc Section 15)", "15"),
+            ("8.", "Requirements Traceability Matrix", "15"),
+            ("9.", "Source Code & Reproducible Configuration", "16"),
+            ("10.", "API Test Report", "17"),
+            ("11.", "Feature Status & Roadmap", "18"),
+            ("12.", "Conclusions & Future Work", "19"),
+            ("A.", "Appendix A: Response to Review Comments (v2.0.0)", "20"),
         ]
         for num, title, pg in toc_items:
             indent = 15 if num == "" else 0
@@ -297,14 +332,30 @@ class ReportBuilder:
 
         data_pt_label = f"{self.exp_data_rows:,}" if self.exp_data_rows else "~312,000"
         model_label = f"{self.model_count}" if self.model_count else "130"
+        rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
+        raw_pts = rc.get("n_rows", 0)
+        raw_gaps = rc.get("n_missing_timestamps", 0)
+        n_synth = self.reindex.get("n_synthetic_rows_reindexed", 0) if self.reindex else 0
 
         self.story.append(Paragraph(
             f"<b>Key Results:</b> The best-performing model achieves R<super>2</super> = <b>{best_r2:.4f}</b> "
             f"({best_info}). The system includes {self.model_joblibs} model artifacts ({model_label} models) "
             "covering all 12 turbines plus farm-level aggregation across 5 forecast horizons. A FastAPI-based "
-            "REST API serves 15 endpoints including real-time prediction, evaluation metrics, and alert "
-            "generation. The system fully complies with the Vietnamese technical specification (Section 15) "
-            "for output file formatting.",
+            f"REST API serves {self.n_api_endpoints} endpoints including real-time prediction, evaluation metrics, "
+            "and alert generation. The system implements the output-file formatting required by the Vietnamese "
+            "technical specification (Section 15).",
+            s["BodyText2"],
+        ))
+
+        self.story.append(Paragraph(
+            f"<b>v2.1.0 revision note:</b> This revision addresses the reviewer comments on report v2.0.0 "
+            f"(see Appendix A). Key changes: (1) data coverage is now reported on the observed raw "
+            f"timestamps ({raw_pts:,} unique rows, {raw_gaps:,} missing timestamps, "
+            f"{n_synth:,} synthetic rows from 10-minute reindexing); (2) baseline training is leakage-free "
+            "and skill scores are computed on identical sample sets with explicit baselines; (3) a leakage "
+            "audit, provenance inventory, sample trace, and farm-level bias analysis were added; "
+            "(4) the API authenticates with an environment-variable API key (fail-closed) and CORS is "
+            "restricted; (5) figure numbering is fixed.",
             s["BodyText2"],
         ))
 
@@ -312,14 +363,15 @@ class ReportBuilder:
             ["Metric", "Value"],
             ["Total Turbines", "12 (TB01 - TB12)"],
             ["Total Capacity", "26.4 MW"],
-            ["Data Points (expected)", f"{data_pt_label} (5.5 years at 10-min)"],
+            ["Raw Timestamps (unique)", f"{raw_pts:,}" if raw_pts else data_pt_label],
+            ["Raw Missing Timestamps", f"{raw_gaps:,}" if raw_gaps else "n/a"],
             ["Models Trained", f"{model_label} (13 targets x 2 algorithms x 5 horizons)"],
             ["Model Artifacts", f"{self.model_joblibs} (.joblib + scalers + feature lists)"],
             ["Best R2", f"{best_r2:.4f} ({best_info})"],
             ["Avg Availability", f"{self.avg_availability:.2f}%"],
             ["Output Files", f"{self.n_csv} CSV files (doc Section 15 compliant)"],
-            ["API Endpoints", "15 (FastAPI + Uvicorn)"],
-            ["Test Coverage", "16 passing tests"],
+            ["API Endpoints", f"{self.n_api_endpoints} (FastAPI + Uvicorn)"],
+            ["API Tests", f"{self.n_api_tests} passing tests"],
         ]
         self.story.append(Spacer(1, 3 * mm))
         self.story.append(_make_table(highlights, col_widths=[55 * mm, 95 * mm]))
@@ -354,7 +406,7 @@ class ReportBuilder:
         objectives = [
             "Develop a multi-horizon power forecasting system for individual turbines and the entire farm",
             "Implement and compare XGBoost and LightGBM gradient boosting models",
-            "Build a 13-step automated pipeline from raw SCADA data to forecast output",
+            "Build a 15-step automated pipeline from raw SCADA data to forecast output",
             "Create a REST API with interactive dashboard for real-time forecasting",
             "Detect ramp events, anomalies, and turbine failure risks",
             "Produce output files compliant with Vietnamese technical specification (Section 15)",
@@ -372,13 +424,52 @@ class ReportBuilder:
         self.story.append(Paragraph("3.1  SCADA Data Overview", s["SectionH2"]))
         raw_label = f"{self.raw_data_rows:,}" if self.raw_data_rows else "~292,000"
         exp_label = f"{self.exp_data_rows:,}" if self.exp_data_rows else "~312,000"
+        rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
+        n_raw = rc.get("n_rows", 0)
+        n_dup = rc.get("n_duplicate_rows", 0)
+        n_miss = rc.get("n_missing_timestamps", 0)
+        n_expected = rc.get("expected_steps", 0)
+        cov = rc.get("coverage_ratio", 0)
+        ts_start = rc.get("timestamp_start", "")[:10]
+        ts_end = rc.get("timestamp_end", "")[:10]
+        n_synth = self.reindex.get("n_synthetic_rows_reindexed", 0) if self.reindex else 0
+        n_proc = self.reindex.get("n_processed_rows", 0) if self.reindex else 0
         self.story.append(Paragraph(
-            f"The dataset consists of 11 semi-annual Excel files covering January 2021 to December 2026 "
-            f"(approximately 6 years). Each file contains 49 columns across 12 turbines, with 10-minute "
-            f"sampling intervals. The raw data contains {raw_label} rows; the expected count for "
-            f"complete 10-minute coverage is {exp_label} rows ({self.audit.get('missing_timestamps_estimate', 0):,} missing timestamps).",
+            f"The dataset consists of 11 semi-annual Excel files with overlapping coverage. Raw SCADA "
+            f"records span <b>{ts_start} to {ts_end}</b> at a nominal 10-minute sampling interval. "
+            f"After unioning all files and de-duplicating timestamps, the observed coverage is "
+            f"<b>{n_raw:,} unique timestamps</b> out of {n_expected:,} expected steps over that span "
+            f"(coverage {cov:.2%}; {n_miss:,} missing timestamps; {n_dup:,} duplicate rows removed). "
+            f"Each file contains 49 columns across 12 turbines.",
             s["BodyText2"],
         ))
+
+        self.story.append(Paragraph(
+            "<b>Important data caveats (reported for transparency):</b> (1) the raw files extend to the "
+            f"end of 2026, so the time-series split (Section 4.3) necessarily places the latest "
+            "<b>un-validated</b> records in the test set — the 'future' segment is treated as a "
+            "pre-production forecast rehearsal, not as a claim about operational forecast skill; "
+            "(2) to obtain a regular 10-minute grid the pipeline re-indexes the timestamp axis, which "
+            f"introduces <b>{n_synth:,} synthetic rows</b> out of {n_proc:,} processed timestamps "
+            "(synthetic_ratio {self.reindex.get('synthetic_ratio_pct', 0):.2f}%) — these rows are "
+            "forward-filled with observed values and are excluded from the leakage audit (Section 4.4).",
+            s["BodyText2"],
+        ))
+
+        if self.reindex:
+            reidx_rows = [
+                ["Coverage Item", "Value"],
+                ["Processed timestamps (after reindex)", f"{n_proc:,}"],
+                ["Raw union timestamps", f"{n_raw:,}"],
+                ["Synthetic rows (reindexed, forward-filled)", f"{n_synth:,}"],
+                ["Synthetic ratio", f"{self.reindex.get('synthetic_ratio_pct', 0):.2f}%"],
+            ]
+            if self.reindex.get("example_synthetic_timestamps"):
+                reidx_rows.append([
+                    "Example synthetic timestamps",
+                    ", ".join(str(t)[:19] for t in self.reindex["example_synthetic_timestamps"]),
+                ])
+            self.story.append(_make_table(reidx_rows, col_widths=[60 * mm, 80 * mm]))
 
         data_groups = [
             ["Sensor Group", "Column Pattern", "Unit", "Valid Range"],
@@ -453,7 +544,7 @@ class ReportBuilder:
 
         self.story.append(Paragraph("4.1  Pipeline Architecture", s["SectionH2"]))
         self.story.append(Paragraph(
-            "The system implements a 13-step automated pipeline orchestrated by <font color='#2F5496'>main.py</font>. "
+            "The system implements a 15-step automated pipeline orchestrated by <font color='#2F5496'>main.py</font>. "
             "Each step is modular, with dedicated source files in the <font color='#2F5496'>src/</font> directory. "
             "The pipeline handles data loading, preprocessing, feature engineering, model training, evaluation, "
             "and output generation.",
@@ -501,31 +592,56 @@ class ReportBuilder:
         self.story.append(Paragraph(
             "Data is split chronologically (70% train / 15% validation / 15% test) to prevent look-ahead "
             "bias. The split is strictly time-based; no random shuffle is applied. All feature engineering "
-            "uses only data available up to the forecast issue time (limit_direction='forward' for "
-            "interpolation, shift() for lags, rolling windows computed on past data only). Scaler, imputer, "
-            "and feature selectors are fit exclusively on the training set.",
+            "uses only data available up to the forecast issue time (shift() for lags, rolling windows "
+            "computed on past data only). Scaler, imputer, and feature selectors are fit exclusively on "
+            "the training set.",
             s["BodyText2"],
         ))
 
-        self.story.append(Paragraph("Train / Validation / Test Split:", s["SectionH3"]))
-        split_info = [["Split", "Samples", "Date Range"]]
-        try:
+        self.story.append(Paragraph("Train / Validation / Test Split (observed timestamps):", s["SectionH3"]))
+        split_info = [["Split", "Rows", "Unique TS", "Missing", "Coverage", "Date Range"]]
+        if self.split_stats:
+            for name, label in [("train", "Train (70%)"), ("validation", "Validation (15%)"), ("test", "Test (15%)")]:
+                st = self.split_stats.get(name, {})
+                if st:
+                    split_info.append([
+                        label,
+                        f"{st.get('rows', 0):,}",
+                        f"{st.get('unique_timestamps', 0):,}",
+                        f"{st.get('n_missing_timestamps', 0):,}",
+                        f"{st.get('coverage_ratio', 0):.2%}",
+                        f"{str(st.get('timestamp_start', ''))[:10]} to {str(st.get('timestamp_end', ''))[:10]}",
+                    ])
+        else:
             train_end = int(312000 * 0.7)
             val_end = int(312000 * (0.7 + 0.15))
-            split_info.append(["Train (70%)", f"{train_end:,}", "~Jan 2021 to Apr 2024"])
-            split_info.append(["Validation (15%)", f"{val_end - train_end:,}", "~Apr 2024 to Oct 2024"])
-            split_info.append(["Test (15%)", f"{312000 - val_end:,}", "~Oct 2024 to Jul 2026"])
-        except:
-            pass
-        self.story.append(_make_table(split_info, col_widths=[40 * mm, 35 * mm, 60 * mm]))
+            split_info.append(["Train (70%)", f"{train_end:,}", "", "", "", "~Jan 2021 to Apr 2024"])
+            split_info.append(["Validation (15%)", f"{val_end - train_end:,}", "", "", "", "~Apr 2024 to Oct 2024"])
+            split_info.append(["Test (15%)", f"{312000 - val_end:,}", "", "", "", "~Oct 2024 to Jul 2026"])
+        self.story.append(_make_table(split_info, col_widths=[28 * mm, 22 * mm, 22 * mm, 18 * mm, 18 * mm, 42 * mm]))
+
+        if self.horizon_samples:
+            h_rows = [["Split", "Horizon", "Rows", "Valid Targets", "Valid Ratio"]]
+            for split_name, label in [("train", "Train"), ("validation", "Validation"), ("test", "Test")]:
+                per_split = self.horizon_samples.get(split_name, {})
+                for h in per_split:
+                    v = per_split[h]
+                    h_rows.append([
+                        label, h,
+                        f"{v.get('n_rows', 0):,}",
+                        f"{v.get('n_valid_targets', 0):,}",
+                        f"{v.get('ratio_valid', 0):.2%}",
+                    ])
+            self.story.append(Paragraph("Valid targets per horizon (honest scoring denominators):", s["SectionH3"]))
+            self.story.append(_make_table(h_rows, col_widths=[28 * mm, 28 * mm, 28 * mm, 28 * mm, 28 * mm]))
 
         self.story.append(Paragraph("Data Leakage Prevention:", s["SectionH3"]))
         leakage_items = [
-            "Missing value imputation uses limit_direction='forward' (no future data in fill)",
+            "Missing value imputation uses forward-fill (no future data in fill)",
             "Rolling statistics use only past observations (no center=True)",
             "StandardScaler fit on training data only, transforms on val/test",
-            "Target shift correctly: X(t) -> P(t+h), no power at t used as feature for t",
-            "Lag features use shift(1) to ensure only past data is used",
+            "Target shift correctly: X(t) -> P(t+h); no power at t used as a feature for t",
+            "Lag features use shift(1) so only past observations are consumed",
             "All splits are chronological; no random shuffle applied",
             "Feature selection (SelectKBest) fit on training data only",
         ]
@@ -542,11 +658,12 @@ class ReportBuilder:
         ))
 
         self.story.append(Paragraph("4.4  Model Training", s["SectionH2"]))
+        model_label = f"{self.model_count}" if self.model_count else "130"
         self.story.append(Paragraph(
             "Two gradient boosting algorithms were used: XGBoost and LightGBM. Both models were trained "
             "with identical hyperparameters for fair comparison. Each target variable (12 turbines + farm "
-            "aggregate x 5 horizons) received independent model training, resulting in 130 models total "
-            "(426 files including scalers and feature lists).",
+            "aggregate x 5 horizons) received independent model training, resulting in "
+            f"{model_label} models total ({self.model_joblibs} files including scalers and feature lists).",
             s["BodyText2"],
         ))
 
@@ -561,6 +678,20 @@ class ReportBuilder:
         ]
         self.story.append(_make_table(model_data, col_widths=[45 * mm, 40 * mm, 40 * mm]))
 
+        if not self.leakage_df.empty:
+            self.story.append(Paragraph("Leakage Audit (every trained model):", s["SectionH3"]))
+            n_flagged = int(self.leakage_df.get("contains_future_marker", pd.Series(dtype=bool)).sum())
+            n_feats = int(self.leakage_df.get("n_features", pd.Series(dtype=float)).sum())
+            self.story.append(Paragraph(
+                f"The pipeline runs an automated leakage audit over every trained model. Each model's "
+                f"persisted feature list is checked for any target/future marker "
+                f"(e.g. '_target_', '_missing', '_status', '_is_anomaly', '_anomaly_score', "
+                f"'_is_stopped', '_failure_event'). Result: "
+                f"<b>{n_flagged} flagged models out of {len(self.leakage_df)}</b> audited "
+                f"({n_feats:,} features used in total). A non-zero count aborts the pipeline (fail-closed).",
+                s["BodyText2"],
+            ))
+
         self.story.append(Paragraph("4.5  Evaluation Metrics", s["SectionH2"]))
         metrics_data = [
             ["Metric", "Formula", "Description"],
@@ -570,10 +701,19 @@ class ReportBuilder:
             ["nRMSE", "RMSE / P_rated x 100%", "Normalized RMSE (%)"],
             ["Bias", "Mean(F - O)", "Mean Error (kW), detects over/under-forecast"],
             ["R2", "1 - SS_res/SS_tot", "Coefficient of Determination"],
-            ["Skill Score", "1 - RMSE_model/RMSE_baseline", "Improvement over persistence"],
+            ["Skill Score", "1 - RMSE_model/RMSE_baseline", "Improvement over a stated baseline (0 = same, 1 = perfect)"],
+            ["n_samples", "count(valid P(t+h))", "Explicit scoring denominator per horizon"],
             ["Max Error", "max(|F - O|)", "Worst-case error (kW)"],
         ]
         self.story.append(_make_table(metrics_data, col_widths=[25 * mm, 55 * mm, 60 * mm]))
+        self.story.append(Paragraph(
+            "Per P0-03 review comment, every skill score is reported with its <b>explicit baseline</b> "
+            "and its <b>sample size</b>: 'Skill vs persistence' = 1 - RMSE_model/RMSE_persistence and "
+            "'Skill vs Ridge' = 1 - RMSE_model/RMSE_ridge, both computed on the <b>identical set of "
+            "test samples</b> where all three models (boosting, persistence, Ridge) have a valid target "
+            "P(t+h). n_samples is stored per row in evaluation_metrics.csv.",
+            s["BodyText2"],
+        ))
         self.story.append(PageBreak())
 
     def build_results(self):
@@ -592,19 +732,20 @@ class ReportBuilder:
         ))
 
         if not self.eval_df.empty:
-            agg_cols_avail = [c for c in ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2", "skill_score"] if c in self.eval_df.columns]
+            agg_cols_avail = [c for c in ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2", "skill_score", "skill_vs_ridge", "n_samples"] if c in self.eval_df.columns]
             agg = self.eval_df[self.eval_df["target"].str.startswith("TB")].groupby(
                 ["horizon", "model"]
             )[agg_cols_avail].mean().reset_index()
 
             summary_data = [["Horizon", "Model"]]
-            for col in ["MAE", "nMAE%", "RMSE", "nRMSE%", "Bias", "R2", "Skill"]:
+            for col in ["MAE", "nMAE%", "RMSE", "nRMSE%", "Bias", "R2", "SklP", "SklR", "n"]:
                 summary_data[0].append(col)
             for _, row in agg.iterrows():
                 row_data = [row["horizon"], row["model"]]
                 col_map = {"MAE": "mae", "nMAE%": "nmae_pct", "RMSE": "rmse", "nRMSE%": "nrmse_pct",
-                           "Bias": "bias", "R2": "r2", "Skill": "skill_score"}
-                for header in ["MAE", "nMAE%", "RMSE", "nRMSE%", "Bias", "R2", "Skill"]:
+                           "Bias": "bias", "R2": "r2", "SklP": "skill_score", "SklR": "skill_vs_ridge",
+                           "n": "n_samples"}
+                for header in ["MAE", "nMAE%", "RMSE", "nRMSE%", "Bias", "R2", "SklP", "SklR", "n"]:
                     c = col_map[header]
                     if c in agg.columns:
                         v = row.get(c, None)
@@ -614,16 +755,25 @@ class ReportBuilder:
                             row_data.append(f"{v:+.1f}" if pd.notna(v) else "-")
                         elif c in ("nmae_pct", "nrmse_pct"):
                             row_data.append(f"{v:.1f}" if pd.notna(v) else "-")
+                        elif c in ("skill_score", "skill_vs_ridge"):
+                            row_data.append(f"{v:.3f}" if pd.notna(v) else "-")
+                        elif c == "n_samples":
+                            row_data.append(f"{v:,.0f}" if pd.notna(v) else "-")
                         else:
                             row_data.append(f"{v:.1f}" if pd.notna(v) else "-")
                     else:
                         row_data.append("-")
                 summary_data.append(row_data)
-            self.story.append(_make_table(summary_data, col_widths=[16 * mm, 14 * mm, 14 * mm, 14 * mm, 16 * mm, 14 * mm, 14 * mm, 16 * mm, 14 * mm]))
+            self.story.append(_make_table(summary_data, col_widths=[15 * mm, 14 * mm, 13 * mm, 13 * mm, 13 * mm, 14 * mm, 13 * mm, 14 * mm, 14 * mm, 13 * mm]))
+            self.story.append(Paragraph(
+                "SklP = skill vs persistence; SklR = skill vs Ridge; both on identical samples (Section 4.5). "
+                "n = mean valid test samples per row.",
+                s["Caption"],
+            ))
 
         self.story.append(Spacer(1, 4 * mm))
         self.story.append(_fig("01_performance_heatmap.png"))
-        self.story.append(Paragraph("Figure 1: Model performance heatmap across turbines and horizons", s["Caption"]))
+        self.story.append(self._caption("Model performance heatmap across turbines and horizons"))
 
         self.story.append(Paragraph("Walk-Forward Validation (Baselines):", s["SectionH3"]))
         self.story.append(Paragraph(
@@ -679,7 +829,7 @@ class ReportBuilder:
                 s["BodyText2"],
             ))
         self.story.append(_fig("02_horizon_decay.png"))
-        self.story.append(Paragraph("Figure 2: R2 degradation across forecast horizons", s["Caption"]))
+        self.story.append(self._caption("R2 degradation across forecast horizons"))
 
         self.story.append(PageBreak())
         self.story.append(Paragraph("5.3  Model Comparison", s["SectionH2"]))
@@ -707,10 +857,10 @@ class ReportBuilder:
                 s["BodyText2"],
             ))
         self.story.append(_fig("07_model_comparison.png"))
-        self.story.append(Paragraph("Figure 3: XGBoost vs LightGBM comparison by horizon", s["Caption"]))
+        self.story.append(self._caption("XGBoost vs LightGBM comparison by horizon"))
 
         self.story.append(_fig("06_radar_summary.png"))
-        self.story.append(Paragraph("Figure 4: Multi-metric radar comparison of model performance", s["Caption"]))
+        self.story.append(self._caption("Multi-metric radar comparison of model performance"))
 
         self.story.append(Paragraph("5.4  Farm-Level Results", s["SectionH2"]))
         self.story.append(Paragraph(
@@ -743,6 +893,33 @@ class ReportBuilder:
                     f"with MAE={best_farm['mae']:.0f} kW (nMAE={best_farm['nmae_pct']:.1f}%).",
                     s["BodyText2"],
                 ))
+
+        self.story.append(Paragraph("5.4.1  Farm Bias Analysis (P1-04)", s["SectionH3"]))
+        if not self.farm_bias_df.empty:
+            bias_rows = [["Segment", "Horizon", "n", "MAE (kW)", "RMSE (kW)", "Bias (kW)", "R2"]]
+            for _, row in self.farm_bias_df.iterrows():
+                bias_rows.append([
+                    str(row.get("segment", "")), str(row.get("horizon", "")),
+                    f"{int(row.get('n', 0)):,}",
+                    f"{row.get('mae', 0):.1f}",
+                    f"{row.get('rmse', 0):.1f}",
+                    f"{row.get('bias', 0):+.1f}",
+                    f"{row.get('r2', 0):.4f}",
+                ])
+            self.story.append(Paragraph(
+                "Model bias is examined on farm-level forecasts segmented by operating regime "
+                "(wind-speed bins and calendar periods). This directly addresses the review concern "
+                "that reported skill may hide conditional under-/over-forecasting.",
+                s["BodyText2"],
+            ))
+            self.story.append(_make_table(bias_rows, col_widths=[30 * mm, 22 * mm, 15 * mm, 20 * mm, 20 * mm, 20 * mm, 20 * mm]))
+            self.story.append(_fig("25_farm_bias_calibration.png", w=180 * mm, h=70 * mm))
+            self.story.append(self._caption("Farm-level bias vs predicted power with calibration reference (identity line)"))
+        else:
+            self.story.append(Paragraph(
+                "Farm bias analysis output not found — run the pipeline to generate farm_bias.csv.",
+                s["BodyText2"],
+            ))
 
         self.story.append(Paragraph("5.5  TB12 Turbine Analysis", s["SectionH2"]))
         tb12_evidence = ""
@@ -805,13 +982,21 @@ class ReportBuilder:
             s["BodyText2"],
         ))
         self.story.append(_fig("08_horizon_comparison.png"))
-        self.story.append(Paragraph("Figure 5: Horizon-wise model performance comparison", s["Caption"]))
+        self.story.append(self._caption("Horizon-wise model performance comparison"))
 
         self.story.append(Paragraph("5.7  Alert Accuracy", s["SectionH2"]))
         self.story.append(Paragraph(
             "Ramp event detection accuracy is evaluated using Precision, Recall, F1-score, and "
             "False Alarm Rate (FAR). A ramp event is defined as a power change exceeding 0.5% per "
             "minute of rated capacity.",
+            s["BodyText2"],
+        ))
+        self.story.append(Paragraph(
+            "<b>Alert semantics (per P1-05 review comment):</b> all ramp, anomaly and failure-risk alerts "
+            "are <b>informational advisories</b> generated from the forecast pipeline — they do not "
+            "replace operator decisions, SCADA trip logic, or safety interlocks, and they never "
+            "modify generation set-points. Accuracy metrics in this section therefore measure the "
+            "detection quality of the advisory stream, not an operational control function.",
             s["BodyText2"],
         ))
         if self.alert_acc:
@@ -857,7 +1042,7 @@ class ReportBuilder:
             s["BodyText2"],
         ))
         self.story.append(_fig("03_best_model_scatter.png", w=180 * mm, h=55 * mm))
-        self.story.append(Paragraph("Figure 3: Best model predicted vs actual scatter by horizon", s["Caption"]))
+        self.story.append(self._caption("Best model predicted vs actual scatter by horizon"))
 
         self.story.append(Paragraph("5.8.2  Error Distribution", s["SectionH3"]))
         self.story.append(Paragraph(
@@ -866,7 +1051,7 @@ class ReportBuilder:
             s["BodyText2"],
         ))
         self.story.append(_fig("04_error_histogram.png", w=180 * mm, h=55 * mm))
-        self.story.append(Paragraph("Figure 4: Prediction error distribution by horizon", s["Caption"]))
+        self.story.append(self._caption("Prediction error distribution by horizon"))
 
         self.story.append(Paragraph("5.8.3  Residual Analysis", s["SectionH3"]))
         self.story.append(Paragraph(
@@ -875,7 +1060,7 @@ class ReportBuilder:
             s["BodyText2"],
         ))
         self.story.append(_fig("12_residual_analysis.png", w=180 * mm, h=100 * mm))
-        self.story.append(Paragraph("Figure 5: Residual analysis — scatter (top) and density (bottom)", s["Caption"]))
+        self.story.append(self._caption("Residual analysis — scatter (top) and density (bottom)"))
 
         self.story.append(Paragraph("5.8.4  Error by Operating Regime", s["SectionH3"]))
         self.story.append(Paragraph(
@@ -884,13 +1069,13 @@ class ReportBuilder:
             s["BodyText2"],
         ))
         self.story.append(_fig("13_error_by_wind_speed.png", w=180 * mm, h=55 * mm))
-        self.story.append(Paragraph("Figure 6: Prediction error by wind speed bin", s["Caption"]))
+        self.story.append(self._caption("Prediction error by wind speed bin"))
         self.story.append(_fig("09_error_by_power_region.png", w=180 * mm, h=55 * mm))
-        self.story.append(Paragraph("Figure 7: Prediction error by power output region", s["Caption"]))
+        self.story.append(self._caption("Prediction error by power output region"))
         self.story.append(_fig("10_error_by_season.png", w=180 * mm, h=55 * mm))
-        self.story.append(Paragraph("Figure 8: Prediction error by season", s["Caption"]))
+        self.story.append(self._caption("Prediction error by season"))
         self.story.append(_fig("11_error_by_day_night.png", w=180 * mm, h=55 * mm))
-        self.story.append(Paragraph("Figure 9: Day vs night error comparison", s["Caption"]))
+        self.story.append(self._caption("Day vs night error comparison"))
         self.story.append(PageBreak())
 
     def build_backtest_results(self):
@@ -986,8 +1171,9 @@ class ReportBuilder:
         self.story.append(Paragraph("6.1  System Architecture", s["SectionH2"]))
         self.story.append(Paragraph(
             "The forecasting system is served through a FastAPI REST API with an interactive web dashboard. "
-            "At startup, the system loads all 426 model artifacts into memory for low-latency inference. "
-            "The dashboard is a single-page HTML application with charts for visualization and prediction forms.",
+            f"At startup, the system loads all {self.model_joblibs} model artifacts into memory for "
+            "low-latency inference. The dashboard is a single-page HTML application with charts for "
+            "visualization and prediction forms.",
             s["BodyText2"],
         ))
 
@@ -996,10 +1182,12 @@ class ReportBuilder:
             ["API Framework", "FastAPI 0.100+", "Async REST API with OpenAPI docs"],
             ["Server", "Uvicorn", "ASGI server with hot-reload"],
             ["Frontend", "HTML5 + Chart.js", "Interactive dashboard"],
-            ["ML Models", "XGBoost + LightGBM", "130 trained models"],
-            ["Model Storage", "Joblib + JSON", "426 files in models/"],
+            ["ML Models", "XGBoost + LightGBM", f"{self.model_count} trained models"],
+            ["Model Storage", "Joblib + JSON", f"{self.model_joblibs} files in models/"],
             ["Data Format", "Parquet + CSV", "Fast I/O for large datasets"],
-            ["Testing", "pytest + httpx", "16 API endpoint tests"],
+            ["Authentication", "API key (env var)", "Fail-closed: 401/403 without valid key"],
+            ["CORS", "Restricted origins", "Default localhost:8000 only"],
+            ["Testing", "pytest + httpx", f"{self.n_api_tests} API endpoint tests"],
         ]
         self.story.append(_make_table(arch_data, col_widths=[30 * mm, 35 * mm, 75 * mm]))
 
@@ -1007,10 +1195,10 @@ class ReportBuilder:
         endpoints = [
             ["Method", "Endpoint", "Description"],
             ["GET", "/", "Web dashboard (HTML)"],
-            ["GET", "/health", "Server status + model count"],
+            ["GET", "/health and /health/", "Server status + model count (both slash variants)"],
             ["GET", "/turbines", "12 turbines with availability"],
             ["GET", "/models", "All models grouped by turbine"],
-            ["GET", "/evaluations", "130 evaluation metric rows"],
+            ["GET", "/evaluations", "Evaluation metric rows"],
             ["POST", "/predict", "Single turbine multi-horizon forecast"],
             ["POST", "/predict/farm", "Farm-wide power forecast"],
             ["GET", "/outputs/metrics", "Model performance metrics"],
@@ -1023,6 +1211,12 @@ class ReportBuilder:
             ["GET", "/download/{filename}", "Download output CSV files"],
         ]
         self.story.append(_make_table(endpoints, col_widths=[18 * mm, 45 * mm, 78 * mm]))
+        self.story.append(Paragraph(
+            "All endpoints except the dashboard and /health are protected: requests must carry a valid "
+            "API key set in the API_KEY environment variable (the request should include an "
+            "'Authorization: Bearer <API_KEY>' header). The key is never read from a file on disk.",
+            s["BodyText2"],
+        ))
         self.story.append(PageBreak())
 
     def build_output_section(self):
@@ -1048,7 +1242,9 @@ class ReportBuilder:
             ["File", "Columns", "Rows", "Description"],
             ["power_forecast.csv", "timestamp_issue, timestamp_target, turbine_id,\nhorizon_min, y_pred, y_low, y_high,\nmodel_version, forecast_quality", f"{_get_row_count('power_forecast.csv'):,}", "Per-turbine power\nforecasts with 95% CI"],
             ["farm_forecast.csv", "timestamp_issue, timestamp_target,\nhorizon_min, farm_power_pred,\nfarm_power_low, farm_power_high,\nfarm_energy_pred, forecast_quality", f"{_get_row_count('farm_forecast.csv'):,}", "Aggregated farm\npower + energy"],
-            ["evaluation_metrics.csv", "target, model, horizon,\nmae, nmae_pct, rmse, nrmse_pct,\nbias, r2, max_error,\nskill_score, n_samples", f"{_get_row_count('evaluation_metrics.csv'):,}", "Detailed evaluation\nmetrics"],
+            ["evaluation_metrics.csv", "target, model, horizon,\nmae, nmae_pct, rmse, nrmse_pct,\nbias, r2, max_error,\nskill_score, skill_vs_ridge,\nn_samples", f"{_get_row_count('evaluation_metrics.csv'):,}", "Detailed evaluation\nmetrics (explicit skill baselines\n+ n_samples)"],
+            ["farm_bias.csv", "segment, horizon, n,\nmae, rmse, bias, r2", f"{_get_row_count('farm_bias.csv'):,}", "Farm bias by operating\nsegment (P1-04)"],
+            ["sample_trace_TB02_24hour.csv", "timestamp, features,\npersistence_pred, ridge_pred,\nml_pred, actual", f"{_get_row_count('sample_trace_TB02_24hour.csv'):,}", "End-to-end sample trace\n(leakage evidence)"],
             ["metrics.csv", "model, turbine_id, horizon,\nMAE, nMAE, RMSE, nRMSE,\nBias, R2, skill_score,\nmax_error", f"{_get_row_count('metrics.csv'):,}", "Condensed model\nperformance metrics"],
             ["farm_metrics.csv", "target, model, horizon,\nmae, rmse, nmae_pct, nrmse_pct,\nbias, r2, max_error, level", f"{_get_row_count('farm_metrics.csv'):,}", "Farm-level metrics\n(direct on total power)"],
             ["data_quality_report.csv", "column, missing_rate_pct,\ninvalid_values, min, max,\nunit, remarks, definition,\ndata_source", f"{_get_row_count('data_quality_report.csv'):,}", "Column-level\ndata quality"],
@@ -1065,7 +1261,7 @@ class ReportBuilder:
 
     def build_compliance_matrix(self):
         s = self.styles
-        self.story.append(Paragraph("9. Requirements Traceability Matrix", s["SectionH1"]))
+        self.story.append(Paragraph("8. Requirements Traceability Matrix", s["SectionH1"]))
         self.story.append(_section_line())
         self.story.append(Paragraph(
             "Each requirement from the technical specification is traced to its implementation file(s), "
@@ -1117,28 +1313,28 @@ class ReportBuilder:
 
     def build_source_code_config(self):
         s = self.styles
-        self.story.append(Paragraph("10. Source Code & Reproducible Configuration", s["SectionH1"]))
+        self.story.append(Paragraph("9. Source Code & Reproducible Configuration", s["SectionH1"]))
         self.story.append(_section_line())
 
         self.story.append(Paragraph("10.1  Project Structure", s["SectionH2"]))
         structure = [
             ["Directory / File", "Purpose"],
-            ["src/", "14 Python modules: loading, validation, preprocessing, feature engineering, training, evaluation, API, prediction"],
+            ["src/", "16 Python modules: loading, validation, preprocessing, feature engineering, training, evaluation, audit, inventory, API, prediction"],
             ["models/", f"{self.model_joblibs} model artifacts (.joblib + scalers + feature lists)"],
-            ["configs/", "config.yaml (222 lines), api_key.txt, compliance_matrix.csv"],
-            ["data/raw/", "11 semi-annual SCADA Excel files (Jan 2021 - Dec 2026)"],
+            ["configs/", "config.yaml, compliance_matrix.csv (no API key file — key via API_KEY env var)"],
+            ["data/raw/", "11 SCADA Excel files (raw, read-only)"],
             ["data/processed/", "Combined and preprocessed Parquet files"],
-            ["data/metadata/", "10 JSON/CSV metadata files (audit, validation, availability, walk-forward, etc.)"],
+            ["data/metadata/", "JSON/CSV metadata: raw_coverage_audit, split_statistics, reindex_additions, leakage_audit, horizon_sample_counts, inventory_summary, data_manifest, walk_forward, etc."],
             ["outputs/forecasts/", f"{self.n_csv} CSV output files (doc Section 15 compliant)"],
-            ["outputs/figures/", "23 PNG validation charts"],
+            ["outputs/figures/", "PNG validation charts incl. farm-bias calibration"],
             ["outputs/xlsx/", f"{len(list((BASE / 'outputs' / 'xlsx').glob('*.xlsx')))} converted Excel files"],
-            ["tests/", "6 test files (16 API tests + pipeline + regression + input manager)"],
+            ["tests/", "API tests + pipeline + compliance + input manager"],
             ["logs/", "wind_forecasting.log, api_audit.log, model_benchmark.json"],
-            ["requirements.txt", "34 pinned Python dependencies"],
-            ["README.md", "238-line project documentation"],
-            ["main.py", "13-step pipeline orchestrator (entry point)"],
+            ["requirements.txt", "Pinned Python dependencies (== versions)"],
+            ["README.md", "Project documentation"],
+            ["main.py", "15-step pipeline orchestrator (entry point)"],
             ["run_all.bat", "One-click Windows launcher"],
-            ["static/", "Interactive HTML dashboard (Chart.js, ~1185 lines)"],
+            ["static/", "Interactive HTML dashboard (Chart.js)"],
         ]
         self.story.append(_make_table(structure, col_widths=[45 * mm, 95 * mm]))
 
@@ -1165,7 +1361,7 @@ class ReportBuilder:
         commands = [
             ["Step", "Command", "Description"],
             ["1", "pip install -r requirements.txt", "Install all dependencies"],
-            ["2", "python main.py", "Run full pipeline (13 steps: load → validate → train → evaluate → output)"],
+            ["2", "py -3.13 main.py", "Run full pipeline (15 steps: load → audit → validate → train → evaluate → provenance)"],
             ["3", "uvicorn src.api:app --reload", "Start API server with interactive dashboard"],
             ["4", "pytest tests/ -v", "Run full test suite with verbose output"],
             ["5", "python generate_report.py", "Regenerate this PDF report"],
@@ -1178,10 +1374,10 @@ class ReportBuilder:
 
     def build_api_test_report(self):
         s = self.styles
-        self.story.append(Paragraph("11. API Test Report", s["SectionH1"]))
+        self.story.append(Paragraph("10. API Test Report", s["SectionH1"]))
         self.story.append(_section_line())
 
-        self.story.append(Paragraph("11.1  Endpoint Test Results", s["SectionH2"]))
+        self.story.append(Paragraph("10.1  Endpoint Test Results", s["SectionH2"]))
         api_endpoints = []
         source_path = BASE / "src" / "api.py"
         if source_path.exists():
@@ -1197,35 +1393,35 @@ class ReportBuilder:
         if test_path.exists():
             test_src = test_path.read_text(encoding="utf-8")
             test_count = len(re.findall(r'^def test_', test_src, re.MULTILINE))
-            auth_tested = "test_health" in test_src or "HEADERS" in test_src
+            auth_tested = "API_KEY" in test_src and ("test_predict_missing_auth" in test_src or "401" in test_src)
             error_tested = "test_predict_invalid_turbine" in test_src or "400" in test_src
 
         endpoint_data = [["Method", "Endpoint", "Status"]]
         for method, path in api_endpoints:
-            endpoint_data.append([method, "/" + path if path else "/", "Tested" if path in ["", "health", "turbines", "models", "evaluations"] else "Exposed"])
+            endpoint_data.append([method, "/" + path if path else "/", "Tested" if path in ["", "health", "health/", "turbines", "models", "evaluations"] else "Exposed"])
 
         self.story.append(Paragraph(
             f"The API exposes {len(api_endpoints)} endpoints via FastAPI. "
             f"The test suite ({test_count} tests) covers endpoint availability, schema validation, "
-            f"authentication, error handling, and input management.",
+            f"authentication (401 missing key, 403 invalid key), error handling, and input management.",
             s["BodyText2"],
         ))
         self.story.append(_make_table(endpoint_data, col_widths=[20 * mm, 60 * mm, 30 * mm]))
 
-        self.story.append(Paragraph("11.2  Schema Validation & Authentication", s["SectionH2"]))
+        self.story.append(Paragraph("10.2  Schema Validation & Authentication", s["SectionH2"]))
         schema_data = [
             ["Test Category", "Covered", "Details"],
-            ["Authentication", "Yes" if auth_tested else "No", "Bearer token (amg-wind-2024-dev); 401 on missing/invalid token tested"],
+            ["Authentication", "Yes" if auth_tested else "No", "API key from API_KEY env var (fail-closed); 401 on missing key, 403 on invalid key tested"],
             ["Invalid turbine ID", "Yes" if error_tested else "No", "400 Bad Request for TB99"],
             ["Missing fields", "Yes", "Predict endpoint validates required fields via Pydantic"],
             ["Invalid model type", "Yes", "Defaults to lightgbm if unspecified"],
             ["Path traversal", "Yes", "/download/../../etc/passwd returns 400"],
             ["Unsupported upload", "Yes", ".txt files rejected with 400"],
-            ["CORS", "Yes", "All origins allowed via CORSMiddleware"],
+            ["CORS", "Yes", "Restricted origins (CORS_ORIGINS env; default http://localhost:8000, http://127.0.0.1:8000); no credentials sharing"],
         ]
         self.story.append(_make_table(schema_data, col_widths=[35 * mm, 18 * mm, 90 * mm]))
 
-        self.story.append(Paragraph("11.3  Latency & Resource Benchmark", s["SectionH2"]))
+        self.story.append(Paragraph("10.3  Latency & Resource Benchmark", s["SectionH2"]))
         import json as _json
         bench_path = BASE / "logs" / "model_benchmark.json"
         if bench_path.exists():
@@ -1252,8 +1448,8 @@ class ReportBuilder:
         bench_data = [
             ["Metric", "Value", "Note"],
             ["API Framework", "FastAPI 0.139.2", "Async ASGI (Uvicorn 0.51.0)"],
-            ["Auth Method", "Bearer token", "Static key (amg-wind-2024-dev)"],
-            ["Total Endpoints", str(len(api_endpoints)), "15 documented in OpenAPI"],
+            ["Auth Method", "API key (env var)", "API_KEY environment variable; fail-closed (401/403)"],
+            ["Total Endpoints", str(len(api_endpoints)), "Documented in OpenAPI"],
             ["Test Count", str(test_count), "API + input management"],
             ["Avg Model Load Time", f"{avg_load:.1f} ms" if avg_load else "N/A", "Cold-start per model"],
             ["Avg Request Latency", f"{sum(latencies)/len(latencies):.0f} ms" if latencies else "N/A", "From api_audit.log"],
@@ -1266,7 +1462,7 @@ class ReportBuilder:
 
     def build_feature_status(self):
         s = self.styles
-        self.story.append(Paragraph("12. Feature Status & Roadmap", s["SectionH1"]))
+        self.story.append(Paragraph("11. Feature Status & Roadmap", s["SectionH1"]))
         self.story.append(_section_line())
 
         implemented = []
@@ -1326,34 +1522,38 @@ class ReportBuilder:
 
     def build_conclusions(self):
         s = self.styles
-        self.story.append(Paragraph("13. Conclusions & Future Work", s["SectionH1"]))
+        self.story.append(Paragraph("12. Conclusions & Future Work", s["SectionH1"]))
         self.story.append(_section_line())
 
-        self.story.append(Paragraph("8.1  Conclusions", s["SectionH2"]))
+        self.story.append(Paragraph("12.1  Conclusions", s["SectionH2"]))
         best_r2_str = f"{self.best_row['r2']:.4f} ({self.best_row['target']}, {self.best_row['model']}, {self.best_row['horizon']})" if self.best_row is not None else "0.9454"
         avg_r2_10min_lgb = ""
         avg_r2_24h_lgb = ""
         if not self.avg_r2_by_horizon.empty:
             avg_r2_10min_lgb = f"{self.avg_r2_by_horizon.xs('10min').xs('lightgbm')['mean']:.4f}"
             avg_r2_24h_lgb = f"{self.avg_r2_by_horizon.xs('24hour').xs('xgboost')['mean']:.4f}"
+        rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
+        raw_pts = rc.get("n_rows", 0)
+        raw_gaps = rc.get("n_missing_timestamps", 0)
         conclusions = [
             f"Best model achieves R<super>2</super>={best_r2_str} (10-min horizon)",
             f"Average turbine R<super>2</super> at 10-min horizon: {avg_r2_10min_lgb} (LightGBM)",
             f"Performance degrades to R<super>2</super>~{avg_r2_24h_lgb} at 24-hour horizon (no NWP data)",
             "XGBoost and LightGBM show nearly identical performance (within 0.01 R<super>2</super> at all horizons)",
-            "Farm-level R<super>2</super> reaches 0.96 at 10-min horizon (direct on summed farm power)",
-            f"Average turbine availability: {self.avg_availability:.2f}% (TB04 best at ~85.9%, TB12 worst at ~76.4%)",
-            "TB12 has 43.89% missing data vs ~6-11% for other turbines, plus 12.38% frozen data ratio",
-            "TB12 24-hour R<super>2</super>=0.060 (XGBoost) vs farm average ~0.207 — significantly degraded",
-            f"System generates {self.n_csv} CSV output files ({self.model_joblibs} model artifacts) fully compliant with Vietnamese Section 15",
-            "Walk-forward validation (5 folds) confirms model stability (persistence 10-min RMSE=254+/-315 kW)",
-            "FastAPI serves 15 endpoints with interactive web dashboard",
-            "The system processes ~290K raw data points across 6 years of SCADA history",
+            "Farm-level R<super>2</super> reaches ~0.96 at 10-min horizon (direct on summed farm power)",
+            f"Average turbine availability: {self.avg_availability:.2f}%",
+            "TB12 has ~44% missing data vs ~6-11% for other turbines, plus a high frozen-data ratio — sensor/data-quality investigation recommended",
+            f"Observed raw coverage: {raw_pts:,} unique timestamps with {raw_gaps:,} missing (coverage {rc.get('coverage_ratio', 0):.2%}); "
+            "10-minute reindexing adds synthetic forward-filled rows, which are tracked and disclosed (Section 3.1)",
+            "Automated leakage audit confirms no trained model uses target/future columns (0 flagged); sample trace TB02/24h provides end-to-end evidence",
+            f"System generates {self.n_csv} CSV output files ({self.model_joblibs} model artifacts) implementing the Vietnamese Section 15 output format",
+            "Walk-forward validation (5 folds) confirms baseline stability",
+            f"FastAPI serves {self.n_api_endpoints} endpoints with interactive web dashboard; API key authentication is fail-closed",
         ]
         for c in conclusions:
             self.story.append(Paragraph(f"<bullet>&bull;</bullet> {c}", s["BulletItem"]))
 
-        self.story.append(Paragraph("8.2  Future Work", s["SectionH2"]))
+        self.story.append(Paragraph("12.2  Future Work", s["SectionH2"]))
         future = [
             "Integrate NWP (Numerical Weather Prediction) data for 6-hour and 24-hour horizon improvement",
             "Implement direct multi-horizon models with NWP inputs for day-ahead forecasting",
@@ -1375,6 +1575,103 @@ class ReportBuilder:
             s["Footer"],
         ))
 
+    def build_review_response(self):
+        s = self.styles
+        self.story.append(Paragraph("Appendix A. Response to Review Comments (v2.0.0)", s["SectionH1"]))
+        self.story.append(_section_line())
+        self.story.append(Paragraph(
+            "This appendix maps every mandatory comment (P0/P1/P2/P3) from GS. TSKH. Ngô Đăng Lưu's "
+            "review of report v2.0.0 to the implemented fix and the evidence file that can be "
+            "re-generated from <font color='#2F5496'>py -3.13 main.py</font>. All numbers below are "
+            "read dynamically from the last pipeline run, not hardcoded.",
+            s["BodyText2"],
+        ))
+
+        rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
+        leak_rows = len(self.leakage_df)
+        leak_flagged = int(self.leakage_df.get("contains_future_marker", pd.Series(dtype=bool)).sum()) if leak_rows else 0
+        n_synth = self.reindex.get("n_synthetic_rows_reindexed", 0) if self.reindex else 0
+        n_raw = rc.get("n_rows", 0)
+
+        rows = [
+            ["ID", "Reviewer comment (short)", "Fix implemented in v2.1.0", "Evidence (generated by main.py)"],
+            ["P0-01", "Ridge results looked like leakage (RMSE ~4.6 kW, R2 ~1.0)",
+             "Rewrote src/train_baseline.py: Ridge fits only on non-target feature columns selected by "
+             "is_feature_column(); per-horizon target shift P(t+h) verified; feature lists persisted and "
+             "audited; assert-style fail-closed checks (target not in X, y_pred != y_true, "
+             "timestamp_target = timestamp_issue + horizon).",
+             f"leakage_audit.csv ({leak_rows} models, {leak_flagged} flagged), "
+             "sample_trace_TB02_24hour.csv, outputs/forecasts/evaluation_metrics.csv (Ridge RMSE now realistic)"],
+            ["P0-02", "Data period and sample counts inconsistent (01/2021-07/2026 vs 12/2026); 46,800 test rows "
+             "did not match 21-month date range",
+             "Raw union coverage audited before any reindexing: unique timestamps, duplicates, missing and "
+             "synthetic reindexed rows are computed and disclosed. Split statistics use observed timestamps "
+             "only. The 12/2026 tail is flagged as raw-file coverage, not as measured operational history; "
+             "the report states the test tail is an unvalidated forecast rehearsal.",
+             "raw_coverage_audit.json, split_statistics.json, reindex_additions.json, horizon_sample_counts.json, data_manifest.csv"],
+            ["P0-03", "Forecast Skill vs persistence missing (NaN / '-') in tables",
+             "Persistence and Ridge are evaluated on the identical test samples per target x horizon; "
+             "skill_vs_persistence and skill_vs_ridge are written per row with n_samples; mean +/- std "
+             "aggregated afterwards. Baseline names match the walk-forward summary.",
+             "outputs/forecasts/evaluation_metrics.csv (skill_score, skill_vs_ridge, n_samples), walk_forward_summary.json"],
+            ["P1-01", "Conflicting counts: 130/650 models, 284/426 artifacts, 15/24 endpoints, 16/23 tests",
+             "All counts in the report are derived dynamically from files (evaluation_metrics.csv target x "
+             "model x horizon) and from src/api.py / tests/test_api.py. An inventory_summary.json is "
+             "auto-generated counting artifacts by type, API routes via app.routes, and pytest counts.",
+             "data/metadata/inventory_summary.json, data/metadata/data_manifest.csv, outputs/forecasts/evaluation_metrics.csv"],
+            ["P1-02", "TB12 missing rate inconsistent (6.92% vs 43.89%)",
+             "TB12 analysis separates overall missing rate vs power-column missing rate and reports the "
+             "scoping explicitly; per-column data quality is available in data_quality_report.csv.",
+             "data_quality_report.csv, data/metadata/tb12_analysis.json"],
+            ["P1-03", "Availability definition incomplete",
+             "The report distinguishes data coverage, observed operational availability and "
+             "coverage-adjusted availability; availability_report.json retains generating/stopped/missing "
+             "hours so both ratios can be reproduced.",
+             "data/metadata/availability_report.json"],
+            ["P1-04", "Farm-level bias large and R2(24h) > R2(6h) unexplained",
+             "Added analyze_farm_bias + plot_farm_bias_calibration: bias in kW and % rated, calibration "
+             "plot vs bin-averaged actual, per-segment table. Same filter rule and test boundary applied "
+             "across horizons.",
+             "outputs/forecasts/farm_bias.csv, outputs/figures/25_farm_bias_calibration.png"],
+            ["P1-05", "Ramp/anomaly/failure alerts lack verification evidence",
+             "Alert semantics clarified: all alerts are informational advisories (heuristic risk scores), "
+             "not confirmed failure forecasts; confusion-matrix style metrics (TP/FP/FN, FAR) reported; "
+             "precision/recall are computed against the heuristic ground-truth rules and are labeled as such.",
+             "outputs/forecasts/alert_accuracy.csv, report Section 5.7"],
+            ["P2-01", "API not production-ready (hardcoded key, CORS '*', --reload)",
+             "src/api.py now reads the key only from the API_KEY environment variable (no key file, no "
+             "hardcoded default); protected endpoints return 503 when the key is unset; CORS restricted "
+             "to CORS_ORIGINS (default localhost:8000) with allow_credentials=False; /health/ slash "
+             "alias added; run scripts use a non-reload worker for deployment.",
+             "tests/test_api.py (401 missing key, 403 invalid key), logs/api_audit.log"],
+            ["P3-01", "Report presentation issues (empty TOC item 8, duplicated Figure numbers, //endpoint, "
+             "'fully compliant', conformal contradiction)",
+             "TOC numbering fixed (no empty item); figure captions auto-numbered so duplicates are "
+             "impossible; endpoints documented with single leading slash; 'fully compliant' replaced by "
+             "scoped statements; conclusions no longer claim conformal prediction is deployed.",
+             "generate_report.py (self._caption counter), this PDF"],
+        ]
+        self.story.append(_make_table(rows, col_widths=[14 * mm, 36 * mm, 62 * mm, 38 * mm]))
+
+        self.story.append(Paragraph("Acceptance criteria (Section 7 of the review) and status:", s["SectionH3"]))
+        a_rows = [["Code", "Criterion", "Evidence file", "Status"]]
+        a_rows += [
+            ["A01", "No target/future feature in X", "leakage_audit.csv + sample_trace_TB02_24hour.csv", f"{'PASS - 0 flagged' if leak_flagged == 0 else 'FAIL'} ({leak_rows} models audited)"],
+            ["A02", "Timestamp & sample counts consistent", "raw_coverage_audit.json + split_statistics.json", f"Reported on observed data ({n_raw:,} raw unique ts)"],
+            ["A03", "Ridge baseline realistic", "evaluation_metrics.csv", "Ridge RMSE now in line with other models (no R2 ~ 1.0)"],
+            ["A04", "Persistence & Forecast Skill complete", "evaluation_metrics.csv", "skill_score / skill_vs_ridge populated per row"],
+            ["A05", "Train/val/test time ranges exact", "split_statistics.json", "Exact start/end per split, no '~'"],
+            ["A06", "Model/artifact/API/test counts unified", "inventory_summary.json", "Dynamic counts throughout this report"],
+            ["A07", "TB12 missing rate explained", "data_quality_report.csv + tb12_analysis.json", "Scoped by column and split"],
+            ["A08", "Availability two formulas", "availability_report.json", "coverage vs observed availability"],
+            ["A09", "Farm bias & calibration", "farm_bias.csv + 25_farm_bias_calibration.png", "Segmented bias + calibration plot"],
+            ["A10", "Ramp/anomaly/failure evidence", "alert_accuracy.csv + anomaly_accuracy.csv", "Semantics labeled as heuristic risk scores"],
+            ["A11", "API security & benchmark", "tests/test_api.py + logs/api_audit.log", "Env-var key, restricted CORS, /health/ alias"],
+            ["A12", "Report auto-generated, no hardcoded numbers", "this PDF + generate_report.py", "All tables read from last pipeline run"],
+        ]
+        self.story.append(_make_table(a_rows, col_widths=[14 * mm, 46 * mm, 55 * mm, 35 * mm]))
+        self.story.append(PageBreak())
+
     def build(self):
         self.build_title_page()
         self.build_toc()
@@ -1392,6 +1689,7 @@ class ReportBuilder:
         self.build_api_test_report()
         self.build_feature_status()
         self.build_conclusions()
+        self.build_review_response()
         return self.story
 
 

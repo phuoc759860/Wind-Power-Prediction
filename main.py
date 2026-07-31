@@ -15,8 +15,8 @@ from src.column_mapping import apply_column_mapping, create_data_dictionary
 from src.data_validation import run_validation
 from src.preprocessing import preprocess_pipeline
 from src.feature_engineering import build_feature_matrix, create_target_columns
-from src.split_time_series import split_by_time, get_split_statistics, walk_forward_split
-from src.train_baseline import train_baselines, walk_forward_baselines
+from src.split_time_series import split_by_time, get_split_statistics, walk_forward_split, horizon_sample_counts
+from src.train_baseline import train_baselines, walk_forward_baselines, build_test_baseline_predictions
 from src.train_power_model import train_power_models, save_models
 from src.train_anomaly_model import run_anomaly_detection
 from src.train_failure_model import run_failure_analysis
@@ -26,8 +26,15 @@ from src.evaluate import (evaluate_all_models, generate_evaluation_report,
                           plot_farm_timeseries, plot_radar_summary,
                           compute_farm_level_metrics, analyze_tb12,
                           evaluate_alert_accuracy, evaluate_anomaly_detection,
-                          plot_tb12_distribution)
+                          plot_tb12_distribution, analyze_farm_bias,
+                          plot_farm_bias_calibration, append_baseline_rows)
 from src.predict import predict_power, create_forecast_output, add_confidence_intervals, save_forecasts
+from src.audit import (raw_file_manifest, raw_timestamp_union, timestamp_audit,
+                       reindex_additions_report, leakage_audit, sample_trace,
+                       horizon_valid_samples, ridge_feature_evidence,
+                       leakage_assertions, write_sample_traces, write_checksums,
+                       timestamp_audit_csv)
+from src.inventory import generate_inventory
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,7 +55,7 @@ def load_config(config_path=None):
         return yaml.safe_load(f)
 
 
-def main(config_path=None):
+def main(config_path=None, run_wf_ml=True, run_wf=True):
     start_time = time.time()
     logger.info("=" * 70)
     logger.info("WIND POWER FORECASTING SYSTEM - AMG WIND FARM")
@@ -77,6 +84,35 @@ def main(config_path=None):
     info = get_data_info(raw_data)
     logger.info(f"Raw data shape: {info['shape']}")
     logger.info(f"Date range: {info.get('date_range', 'N/A')}")
+
+    raw_ts = None
+    coverage = None
+    reidx = None
+    # Raw-file manifest (P1-01) + true raw coverage before any padding (P0-02)
+    try:
+        manifest = raw_file_manifest(raw_dir)
+        manifest.to_csv(base_dir / "data" / "metadata" / "data_manifest.csv", index=False)
+        logger.info(f"Raw manifest written: {len(manifest)} files (sha256, coverage windows)")
+
+        raw_ts = raw_timestamp_union(raw_dir)
+        coverage = timestamp_audit(raw_ts, interval_minutes=10)
+        coverage["note"] = ("Coverage computed on the raw union of timestamps BEFORE any "
+                            "reindexing/padding. n_missing_timestamps are true raw holes.")
+        with open(base_dir / "data" / "metadata" / "raw_coverage_audit.json", "w") as f:
+            json.dump(coverage, f, indent=2, default=str)
+        ov = coverage["overall"]
+        logger.info(f"RAW UNION coverage: {ov['n_rows']} unique timestamps, "
+                    f"{ov['timestamp_start']} -> {ov['timestamp_end']}, "
+                    f"expected {ov['expected_steps']}, missing {ov['n_missing_timestamps']} "
+                    f"({ov['coverage_ratio']*100:.2f}%)")
+
+        # P0-02 Step 1 evidence: flat timestamp_audit.csv + frozen checksums.txt
+        timestamp_audit_csv(raw_ts, interval_minutes=10,
+                            out_path=str(base_dir / "data" / "metadata" / "timestamp_audit.csv"))
+        write_checksums(raw_dir, str(base_dir / "data" / "metadata" / "checksums.txt"))
+        logger.info("timestamp_audit.csv + checksums.txt written (P0-02 evidence)")
+    except Exception as e:
+        logger.warning(f"Raw manifest/coverage audit failed: {e}")
 
     # ============================================================
     # STEP 2: Column Mapping
@@ -180,53 +216,71 @@ def main(config_path=None):
     for split_name, s in split_stats.items():
         logger.info(f"  {split_name:12s}: {s['rows']:7d} rows  {s.get('timestamp_start',''):s} to {s.get('timestamp_end',''):s}")
         if "expected_steps" in s:
-            logger.info(f"  {'':12s}  expected={s['expected_steps']}, actual={s['actual_steps']}, "
-                        f"diff={s['step_diff']:+d}, dups={s['n_duplicate_timestamps']}, missing={s['n_missing_timestamps']}")
+            logger.info(f"  {'':12s}  expected={s['expected_steps']}, unique={s['unique_timestamps']}, "
+                        f"dups={s['n_duplicate_timestamps']}, missing={s['n_missing_timestamps']} "
+                        f"(coverage {s['coverage_ratio']*100:.2f}%)")
     with open(base_dir / "data" / "metadata" / "split_statistics.json", "w") as f:
         json.dump(split_stats, f, indent=2, default=str)
     logger.info("  Split statistics saved to data/metadata/split_statistics.json")
+
+    # Honest per-horizon valid-sample counts (rows whose target P(t+h) exists).
+    h_samples = horizon_sample_counts(train_df, val_df, test_df, config)
+    with open(base_dir / "data" / "metadata" / "horizon_sample_counts.json", "w") as f:
+        json.dump(h_samples, f, indent=2, default=str)
+    for split_name, per_h in h_samples.items():
+        for h_name, hc in per_h.items():
+            logger.info(f"  {split_name:10s} {h_name:6s}: valid targets {hc['n_valid_targets']}/{hc['n_rows']} "
+                        f"({hc['ratio_valid']*100:.1f}%)")
 
     power_cols = [c for c in train_df.columns if c.endswith("_power")
                   and "target" not in c and "lag" not in c and "roll" not in c
                   and "diff" not in c and "ramp" not in c]
     logger.info(f"Power columns found: {len(power_cols)}")
 
-    # Walk-forward validation for baselines (fast)
-    logger.info("\n" + "-" * 50)
-    logger.info("WALK-FORWARD VALIDATION (BASELINES)")
-    logger.info("-" * 50)
-    wf_results = walk_forward_baselines(feature_data, power_cols, config, n_folds=5)
-    wf_summary = wf_results.get("summary", {})
-    for k, v in sorted(wf_summary.items()):
-        logger.info(f"  {v['model']:12s} {v['horizon']:6s}: RMSE={v['rmse_mean']:.1f} +/- {v['rmse_std']:.1f}  R2={v['r2_mean']:.4f} +/- {v['r2_std']:.4f}  (n={v['n_folds']})")
-    with open(base_dir / "data" / "metadata" / "walk_forward_summary.json", "w") as f:
-        json.dump(wf_summary, f, indent=2, default=str)
+    # Walk-forward validation for baselines
+    wf_summary = {}
+    if run_wf:
+        logger.info("\n" + "-" * 50)
+        logger.info("WALK-FORWARD VALIDATION (BASELINES)")
+        logger.info("-" * 50)
+        wf_results = walk_forward_baselines(feature_data, power_cols, config, n_folds=5)
+        wf_summary = wf_results.get("summary", {})
+        for k, v in sorted(wf_summary.items()):
+            logger.info(f"  {v['model']:12s} {v['horizon']:6s}: RMSE={v['rmse_mean']:.1f} +/- {v['rmse_std']:.1f}  R2={v['r2_mean']:.4f} +/- {v['r2_std']:.4f}  (folds={v['n_folds']}, eval={v['n_evaluations']})")
+        with open(base_dir / "data" / "metadata" / "walk_forward_summary.json", "w") as f:
+            json.dump(wf_summary, f, indent=2, default=str)
+    else:
+        logger.info("SKIP: walk-forward baselines disabled (--skip-wf); reusing data/metadata/walk_forward_summary.json")
 
     # Walk-forward validation for ML models (full coverage: all turbines x horizons)
-    logger.info("\n" + "-" * 50)
-    logger.info("WALK-FORWARD VALIDATION (ML MODELS - FULL)")
-    logger.info("-" * 50)
-    from src.train_power_model import walk_forward_all_ml
-    wf_ml_df = walk_forward_all_ml(feature_data, config, n_folds=3,
-                                   save_path=str(base_dir / "data" / "metadata" / "walk_forward_ml.csv"))
+    # Optional: expensive (~30 min). Baseline walk-forward above is always run.
+    if run_wf_ml:
+        logger.info("\n" + "-" * 50)
+        logger.info("WALK-FORWARD VALIDATION (ML MODELS - FULL)")
+        logger.info("-" * 50)
+        from src.train_power_model import walk_forward_all_ml
+        wf_ml_df = walk_forward_all_ml(feature_data, config, n_folds=3,
+                                       save_path=str(base_dir / "data" / "metadata" / "walk_forward_ml.csv"))
 
-    if not wf_ml_df.empty:
-        wf_summary_ml = []
-        for (mdl, tgt), grp in wf_ml_df.groupby(["model", "target"]):
-            wf_summary_ml.append({
-                "model": mdl, "target": tgt,
-                "rmse_mean": round(grp["rmse"].mean(), 2),
-                "rmse_std": round(grp["rmse"].std(), 2),
-                "r2_mean": round(grp["r2"].mean(), 4),
-                "r2_std": round(grp["r2"].std(), 4),
-                "n_folds": len(grp),
-            })
-        wf_summary_ml_df = pd.DataFrame(wf_summary_ml)
-        wf_summary_ml_df.to_csv(base_dir / "data" / "metadata" / "walk_forward_ml_summary.csv", index=False)
+        if not wf_ml_df.empty:
+            wf_summary_ml = []
+            for (mdl, tgt), grp in wf_ml_df.groupby(["model", "target"]):
+                wf_summary_ml.append({
+                    "model": mdl, "target": tgt,
+                    "rmse_mean": round(grp["rmse"].mean(), 2),
+                    "rmse_std": round(grp["rmse"].std(), 2),
+                    "r2_mean": round(grp["r2"].mean(), 4),
+                    "r2_std": round(grp["r2"].std(), 4),
+                    "n_folds": len(grp),
+                })
+            wf_summary_ml_df = pd.DataFrame(wf_summary_ml)
+            wf_summary_ml_df.to_csv(base_dir / "data" / "metadata" / "walk_forward_ml_summary.csv", index=False)
 
-        for _, r in wf_summary_ml_df.iterrows():
-            logger.info(f"  {r['model']:12s} {str(r['target']):40s}: RMSE={r['rmse_mean']:.1f} +/- {r['rmse_std']:.1f}  R2={r['r2_mean']:.4f} +/- {r['r2_std']:.4f}  (n={r['n_folds']})")
-        logger.info(f"  ML walk-forward: {len(wf_ml_df)} rows across {wf_ml_df['fold'].nunique()} folds")
+            for _, r in wf_summary_ml_df.iterrows():
+                logger.info(f"  {r['model']:12s} {str(r['target']):40s}: RMSE={r['rmse_mean']:.1f} +/- {r['rmse_std']:.1f}  R2={r['r2_mean']:.4f} +/- {r['r2_std']:.4f}  (n={r['n_folds']})")
+            logger.info(f"  ML walk-forward: {len(wf_ml_df)} rows across {wf_ml_df['fold'].nunique()} folds")
+    else:
+        logger.info("SKIP: walk-forward ML validation disabled (--no-wf-ml). Baseline walk-forward was run above.")
 
     # ============================================================
     # STEP 7: Train Baselines
@@ -235,7 +289,22 @@ def main(config_path=None):
     logger.info("STEP 7: TRAINING BASELINE MODELS")
     logger.info("=" * 60)
 
-    baseline_results = train_baselines(train_df, val_df, power_cols, config)
+    baseline_results, ridge_models = train_baselines(train_df, val_df, power_cols, config,
+                                                     return_models=True)
+    logger.info(f"Ridge models trained (leakage-free): {len(ridge_models)}")
+
+    # P0-01 evidence: exact ridge feature columns + explicit leakage assertions.
+    try:
+        ridge_ev = ridge_feature_evidence(ridge_models, config)
+        ridge_ev.to_csv(base_dir / "data" / "metadata" / "ridge_feature_columns.csv", index=False)
+        n_ridge_leaks = int((~ridge_ev["leakage_free"]).sum()) if not ridge_ev.empty else 0
+        logger.info(f"Ridge feature evidence: {len(ridge_ev)} models, "
+                    f"{n_ridge_leaks} with target/future leaks")
+        if n_ridge_leaks:
+            raise RuntimeError(f"Ridge leakage detected: {n_ridge_leaks} models")
+    except Exception as e:
+        logger.error(f"Ridge feature evidence failed: {e}")
+        raise
 
     # ============================================================
     # STEP 8: Train ML Models
@@ -276,6 +345,15 @@ def main(config_path=None):
         save_models(all_trained_models, str(base_dir / "models"),
                     config=config, seed=seed, data_path=raw_dir)
 
+        # P0-01 guard: no trained model may use future/target columns.
+        leak_df = leakage_audit(all_trained_models)
+        leak_df.to_csv(base_dir / "data" / "metadata" / "leakage_audit.csv", index=False)
+        n_leaks = int((~leak_df["leakage_free"]).sum()) if not leak_df.empty else 0
+        if n_leaks:
+            logger.error(f"LEAKAGE AUDIT FAILED: {n_leaks} models use future/target columns")
+            raise RuntimeError(f"Leakage audit failed: {n_leaks} leaking models")
+        logger.info(f"Leakage audit passed for {len(leak_df)} models (no target/future columns)")
+
     # ============================================================
     # STEP 9: Anomaly Detection
     # ============================================================
@@ -309,12 +387,58 @@ def main(config_path=None):
 
     predictions = predict_power(test_df, all_trained_models, config)
 
-    results_df = evaluate_all_models(test_df, predictions, baseline_results, config)
+    # Same-sample persistence + ridge predictions on the TEST set (P0-03).
+    test_baseline_preds = build_test_baseline_predictions(test_df, ridge_models, power_cols, config)
+    persistence_preds = {t: v["persistence"] for t, v in test_baseline_preds.items()}
+    ridge_preds = {t: v["ridge"] for t, v in test_baseline_preds.items()}
+
+    results_df = evaluate_all_models(test_df, predictions, baseline_results, config,
+                                     baseline_predictions=persistence_preds,
+                                     ridge_predictions=ridge_preds)
+
+    # P0-03: include persistence + ridge rows on the SAME test samples, then
+    # persist evaluation_metrics.csv so generate_metrics()/the report use it.
+    results_df = append_baseline_rows(results_df, test_df,
+                                      persistence_preds, ridge_preds, config)
+    results_df.to_csv(base_dir / "outputs" / "forecasts" / "evaluation_metrics.csv", index=False)
+    logger.info(f"evaluation_metrics.csv written: {len(results_df)} rows "
+                f"(incl. persistence + ridge baselines on same test samples)")
 
     if not results_df.empty:
         eval_report = generate_evaluation_report(results_df, str(base_dir / "outputs" / "figures"),
                                                   test_data=test_df, predictions=predictions,
                                                   baseline_results=baseline_results)
+
+    # P0-01 evidence: explicit sample traces for TB02 at 10min / 1h / 24h.
+    try:
+        trace = sample_trace(feature_data, ridge_models, all_trained_models, config,
+                             turbine="TB02", horizon="24hour", limit=500)
+        trace.to_csv(base_dir / "outputs" / "forecasts" / "sample_trace_TB02_24hour.csv", index=False)
+        logger.info(f"Sample trace written: {len(trace)} rows "
+                    f"(issue t -> features at t -> target P(t+24h) -> model predictions)")
+    except Exception as e:
+        logger.warning(f"Sample trace failed: {e}")
+
+    try:
+        traces = write_sample_traces(feature_data, ridge_models, all_trained_models, config,
+                                     cases=[("TB02", "10min"), ("TB02", "1hour"), ("TB02", "24hour")],
+                                     out_dir=str(base_dir / "outputs" / "forecasts"), limit=500)
+        for p in traces:
+            logger.info(f"Sample trace written: {p}")
+    except Exception as e:
+        logger.warning(f"Additional sample traces failed: {e}")
+
+    # P0-01 explicit assertion table (target not in X, alignment, not allclose).
+    try:
+        leak_assert = leakage_assertions(feature_data, ridge_models, config)
+        leak_assert.to_csv(base_dir / "data" / "metadata" / "leakage_audit_ridge.csv", index=False)
+        n_fail = int((~leak_assert["all_passed"]).sum())
+        logger.info(f"Ridge leakage assertions: {len(leak_assert)} cases, {n_fail} failed")
+        if n_fail:
+            raise RuntimeError(f"P0-01 assertion failed: {n_fail} (turbine, horizon) cases")
+    except Exception as e:
+        logger.error(f"Leakage assertions failed: {e}")
+        raise
 
     # Farm-level metrics (directly on summed farm power, not avg of turbine R²)
     logger.info("\n" + "-" * 50)
@@ -326,11 +450,25 @@ def main(config_path=None):
             logger.info(f"  {row['horizon']:6s} {row['model']:10s} MAE={row['mae']:.1f} RMSE={row['rmse']:.1f} R2={row['r2']:.4f}")
         farm_metrics_df.to_csv(base_dir / "outputs" / "forecasts" / "farm_metrics.csv", index=False)
 
+    # Farm-model bias analysis (P1-04): direct farm model vs sum of turbines.
+    try:
+        farm_bias_df = analyze_farm_bias(test_df, predictions, config)
+        if not farm_bias_df.empty:
+            farm_bias_df.to_csv(base_dir / "outputs" / "forecasts" / "farm_bias.csv", index=False)
+            plot_farm_bias_calibration(test_df, predictions, config,
+                                       str(base_dir / "outputs" / "figures" / "25_farm_bias_calibration.png"))
+            for _, row in farm_bias_df.iterrows():
+                logger.info(f"  Farm bias {row['horizon']:6s}: bias={row['bias_kw']} kW "
+                            f"({row['bias_pct_rated']}% rated), farm_vs_sum={row['farm_vs_sum_turbines_kw']} kW")
+    except Exception as e:
+        logger.warning(f"Farm bias analysis failed: {e}")
+
     # TB12 specific analysis
     logger.info("\n" + "-" * 50)
     logger.info("TB12 ANALYSIS")
     logger.info("-" * 50)
-    tb12_analysis = analyze_tb12(test_df, results_df)
+    tb12_analysis = analyze_tb12(test_df, results_df,
+                                 split_data={"train": train_df, "val": val_df, "test": test_df})
     for key, val in tb12_analysis.items():
         logger.info(f"  {key}: {val}")
     with open(base_dir / "data" / "metadata" / "tb12_analysis.json", "w") as f:
@@ -411,6 +549,7 @@ def main(config_path=None):
         generate_power_forecast, generate_farm_forecast, generate_metrics,
         generate_data_quality_report, generate_ramp_alert, generate_anomaly_alert,
         generate_failure_risk, generate_temperature_warning,
+        generate_screening_summary,
     )
     generate_power_forecast(test_df, all_trained_models)
     generate_farm_forecast(test_df, all_trained_models)
@@ -420,6 +559,28 @@ def main(config_path=None):
     generate_anomaly_alert(test_df)
     generate_failure_risk(test_df)
     generate_temperature_warning(test_df)
+    generate_screening_summary()
+
+    # ============================================================
+    # STEP 15: Provenance — reindex additions + auto inventory (P0-02, P1-01)
+    # ============================================================
+    logger.info("\n" + "=" * 60)
+    logger.info("STEP 15: PROVENANCE & INVENTORY")
+    logger.info("=" * 60)
+
+    try:
+        reidx = reindex_additions_report(processed_data, raw_ts)
+        with open(base_dir / "data" / "metadata" / "reindex_additions.json", "w") as f:
+            json.dump(reidx, f, indent=2, default=str)
+        logger.info(f"  Reindex additions: {reidx['n_synthetic_rows_reindexed']} synthetic rows "
+                    f"({reidx['synthetic_ratio_pct']}% of processed) added by 10-min resampling")
+    except Exception as e:
+        logger.warning(f"  Reindex report failed: {e}")
+
+    try:
+        generate_inventory(base_dir)
+    except Exception as e:
+        logger.warning(f"  Inventory generation failed: {e}")
 
     # ============================================================
     # SUMMARY
@@ -444,6 +605,28 @@ def main(config_path=None):
     logger.info("      These are time-series baselines, not complete day-ahead systems")
     logger.info("      NWP integration recommended for 6h+ horizon improvement")
 
+    # Report-relevant facts (P0-02)
+    logger.info("-" * 50)
+    logger.info("AUDIT FACTS FOR REPORT (version 2.1.0):")
+    if raw_ts is not None:
+        logger.info(f"  Raw union end: {raw_ts.max()}  (report reference date: 2026-07-30)")
+    logger.info(f"  Test split end: {test_df['timestamp'].max()}")
+    if coverage is not None:
+        logger.info(f"  Raw union missing timestamps: {coverage['overall']['n_missing_timestamps']} "
+                    f"({(1 - coverage['overall']['coverage_ratio'])*100:.2f}%)")
+    if reidx is not None:
+        logger.info(f"  Synthetic reindexed rows: {reidx['n_synthetic_rows_reindexed']} "
+                    f"({reidx['synthetic_ratio_pct']}%)")
+    if not results_df.empty:
+        for horizon in ["10min", "24hour"]:
+            sub = results_df[results_df["horizon"] == horizon]
+            if sub.empty:
+                continue
+            best = sub.loc[sub["r2"].idxmax()]
+            logger.info(f"  Best {horizon} model: {best['model']} R2={best['r2']:.4f} "
+                        f"RMSE={best['rmse']:.1f} kW  skill_vs_persistence={best['skill_vs_persistence']:.4f} "
+                        f"(n={best['n_samples']})")
+
     if not results_df.empty:
         logger.info("\nModel Performance Summary:")
         agg_cols = ["mae", "rmse", "nrmse_pct", "bias", "r2"]
@@ -466,7 +649,13 @@ if __name__ == "__main__":
                         help="Path to config YAML (default: configs/config.yaml)")
     parser.add_argument("--run-all", action="store_true", default=True,
                         help="Run the full pipeline (default: True)")
+    parser.add_argument("--no-wf-ml", action="store_true",
+                        help="Skip the expensive walk-forward validation for ML models (~30 min). "
+                             "Baseline walk-forward, training, evaluation and all audit outputs still run.")
+    parser.add_argument("--skip-wf", action="store_true",
+                        help="Skip baseline walk-forward validation (reuse walk_forward_summary.json). "
+                             "Intended for quick evidence regeneration after a prior full run.")
     args = parser.parse_args()
 
     if args.run_all:
-        results, forecasts = main(args.config)
+        results, forecasts = main(args.config, run_wf_ml=not args.no_wf_ml, run_wf=not args.skip_wf)

@@ -21,8 +21,10 @@ if %errorlevel% neq 0 (
 )
 
 echo [3/4] Running main pipeline...
-echo This will take approximately 10-15 minutes...
-python main.py
+echo This will take approximately 45-60 minutes...
+echo NOTE: --no-wf-ml skips the optional ~30 min ML walk-forward validation.
+echo       Remove it for the full validation set.
+python main.py --no-wf-ml
 if %errorlevel% neq 0 (
     echo ERROR: Pipeline failed. Check logs/wind_forecasting.log
     pause
@@ -30,8 +32,9 @@ if %errorlevel% neq 0 (
 )
 
 echo [4/4] Starting API server...
+echo NOTE: no --reload in deployment (P2-01); set API_KEY before starting.
 echo Opening http://localhost:8000 in browser...
 start http://localhost:8000
-python -m uvicorn src.api:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn src.api:app --host 0.0.0.0 --port 8000
 
 pause

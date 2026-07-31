@@ -44,19 +44,19 @@ MODEL_TYPES = ["lightgbm", "xgboost"]
 RATED_POWER = 2200
 MODEL_VERSION = "2.0.0"
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
-API_KEY = os.environ.get("API_KEY")
+# ── Auth (P2-01): the key is provided ONLY via the API_KEY environment
+# variable. There is no default key and no api_key.txt fallback: if it is
+# missing the server is FAIL-CLOSED (all protected endpoints return 503).
+API_KEY = os.environ.get("API_KEY", "").strip()
 if not API_KEY:
-    key_file = BASE_DIR / "configs" / "api_key.txt"
-    if key_file.exists():
-        API_KEY = key_file.read_text(encoding="utf-8").strip()
-if not API_KEY:
-    API_KEY = "amg-wind-2024-dev"
-    logger.warning("No API_KEY env or configs/api_key.txt found; using default dev key")
+    logger.warning("No API_KEY environment variable set. "
+                   "API is FAIL-CLOSED: protected endpoints will return 503.")
 
 security_scheme = HTTPBearer(auto_error=False)
 
 async def verify_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme)):
+    if not API_KEY:
+        raise HTTPException(503, "API key not configured on server (set API_KEY env var)")
     if credentials is None:
         raise HTTPException(401, "Missing Authorization header (Bearer <api-key>)")
     if credentials.credentials != API_KEY:
@@ -97,6 +97,27 @@ async def audit_middleware(request: Request, call_next):
     )
     response.headers["X-Request-Time-Ms"] = str(round(elapsed * 1000))
     return response
+
+# ── Global authz (P2-01): every endpoint except the public allow-list requires
+# a valid Bearer API key. If API_KEY is unset the server is FAIL-CLOSED (503).
+PUBLIC_PATHS = {"/", "/health", "/health/", "/turbines", "/models",
+                "/docs", "/docs/", "/openapi.json", "/redoc", "/redoc/"}
+
+async def authz_middleware(request: Request, call_next):
+    path = request.url.path
+    is_public = path in PUBLIC_PATHS or path.startswith("/static/")
+    if not is_public:
+        if not API_KEY:
+            return JSONResponse({"detail": "API key not configured on server (set API_KEY env var)"},
+                                status_code=503)
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else ""
+        if not token:
+            return JSONResponse({"detail": "Missing Authorization header (Bearer <api-key>)"},
+                                status_code=401)
+        if token != API_KEY:
+            return JSONResponse({"detail": "Invalid API key"}, status_code=403)
+    return await call_next(request)
 
 # ── State ─────────────────────────────────────────────────────────────────────
 _model_registry: Dict[str, dict] = {}   # key -> metadata (always loaded)
@@ -229,6 +250,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.middleware("http")(audit_middleware)
+app.middleware("http")(authz_middleware)
+
+# CORS restricted: default localhost only; extend via CORS_ORIGINS env var (comma-separated).
+_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",") if o.strip()]
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
@@ -332,6 +365,11 @@ def health():
         "rate_limit": f"{RATE_LIMIT_REQUESTS}/{RATE_LIMIT_WINDOW_SEC}s",
         "ram_benchmark": dict(_ram_benchmark) if _ram_benchmark else None,
     }
+
+
+@app.get("/health/")
+def health_trailing_slash():
+    return health()
 
 
 @app.get("/turbines")
