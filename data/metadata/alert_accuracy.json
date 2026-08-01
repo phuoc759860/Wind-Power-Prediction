@@ -1,8 +1,8 @@
 {
-  "TB01_power_target_10min_lightgbm_TB01_10min": {
+  "lightgbm_TB01_10min": {
     "turbine_id": "TB01",
     "horizon": "10min",
-    "model": "TB01_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -19,10 +19,10 @@
     "fpr": 0.0919,
     "balanced_accuracy": 0.9129
   },
-  "TB01_power_target_10min_xgboost_TB01_10min": {
+  "xgboost_TB01_10min": {
     "turbine_id": "TB01",
     "horizon": "10min",
-    "model": "TB01_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -39,10 +39,10 @@
     "fpr": 0.105,
     "balanced_accuracy": 0.904
   },
-  "TB01_power_target_1hour_lightgbm_TB01_1hour": {
+  "lightgbm_TB01_1hour": {
     "turbine_id": "TB01",
     "horizon": "1hour",
-    "model": "TB01_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -59,10 +59,10 @@
     "fpr": 0.1432,
     "balanced_accuracy": 0.8686
   },
-  "TB01_power_target_1hour_xgboost_TB01_1hour": {
+  "xgboost_TB01_1hour": {
     "turbine_id": "TB01",
     "horizon": "1hour",
-    "model": "TB01_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -79,10 +79,10 @@
     "fpr": 0.1685,
     "balanced_accuracy": 0.8578
   },
-  "TB01_power_target_24hour_lightgbm_TB01_24hour": {
+  "lightgbm_TB01_24hour": {
     "turbine_id": "TB01",
     "horizon": "24hour",
-    "model": "TB01_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -99,10 +99,10 @@
     "fpr": 0.1925,
     "balanced_accuracy": 0.8055
   },
-  "TB01_power_target_24hour_xgboost_TB01_24hour": {
+  "xgboost_TB01_24hour": {
     "turbine_id": "TB01",
     "horizon": "24hour",
-    "model": "TB01_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -119,10 +119,10 @@
     "fpr": 0.215,
     "balanced_accuracy": 0.8089
   },
-  "TB01_power_target_30min_lightgbm_TB01_30min": {
+  "lightgbm_TB01_30min": {
     "turbine_id": "TB01",
     "horizon": "30min",
-    "model": "TB01_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -139,10 +139,10 @@
     "fpr": 0.1341,
     "balanced_accuracy": 0.88
   },
-  "TB01_power_target_30min_xgboost_TB01_30min": {
+  "xgboost_TB01_30min": {
     "turbine_id": "TB01",
     "horizon": "30min",
-    "model": "TB01_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -159,10 +159,10 @@
     "fpr": 0.1657,
     "balanced_accuracy": 0.8624
   },
-  "TB01_power_target_6hour_lightgbm_TB01_6hour": {
+  "lightgbm_TB01_6hour": {
     "turbine_id": "TB01",
     "horizon": "6hour",
-    "model": "TB01_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -179,10 +179,10 @@
     "fpr": 0.2396,
     "balanced_accuracy": 0.7838
   },
-  "TB01_power_target_6hour_xgboost_TB01_6hour": {
+  "xgboost_TB01_6hour": {
     "turbine_id": "TB01",
     "horizon": "6hour",
-    "model": "TB01_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB01 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21039,
@@ -199,10 +199,10 @@
     "fpr": 0.2869,
     "balanced_accuracy": 0.7668
   },
-  "TB02_power_target_10min_lightgbm_TB02_10min": {
+  "lightgbm_TB02_10min": {
     "turbine_id": "TB02",
     "horizon": "10min",
-    "model": "TB02_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -219,10 +219,10 @@
     "fpr": 0.0825,
     "balanced_accuracy": 0.9136
   },
-  "TB02_power_target_10min_xgboost_TB02_10min": {
+  "xgboost_TB02_10min": {
     "turbine_id": "TB02",
     "horizon": "10min",
-    "model": "TB02_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -239,10 +239,10 @@
     "fpr": 0.1068,
     "balanced_accuracy": 0.9019
   },
-  "TB02_power_target_1hour_lightgbm_TB02_1hour": {
+  "lightgbm_TB02_1hour": {
     "turbine_id": "TB02",
     "horizon": "1hour",
-    "model": "TB02_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -259,10 +259,10 @@
     "fpr": 0.1262,
     "balanced_accuracy": 0.8721
   },
-  "TB02_power_target_1hour_xgboost_TB02_1hour": {
+  "xgboost_TB02_1hour": {
     "turbine_id": "TB02",
     "horizon": "1hour",
-    "model": "TB02_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -279,10 +279,10 @@
     "fpr": 0.1302,
     "balanced_accuracy": 0.8712
   },
-  "TB02_power_target_24hour_lightgbm_TB02_24hour": {
+  "lightgbm_TB02_24hour": {
     "turbine_id": "TB02",
     "horizon": "24hour",
-    "model": "TB02_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -299,10 +299,10 @@
     "fpr": 0.188,
     "balanced_accuracy": 0.805
   },
-  "TB02_power_target_24hour_xgboost_TB02_24hour": {
+  "xgboost_TB02_24hour": {
     "turbine_id": "TB02",
     "horizon": "24hour",
-    "model": "TB02_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -319,10 +319,10 @@
     "fpr": 0.2114,
     "balanced_accuracy": 0.81
   },
-  "TB02_power_target_30min_lightgbm_TB02_30min": {
+  "lightgbm_TB02_30min": {
     "turbine_id": "TB02",
     "horizon": "30min",
-    "model": "TB02_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -339,10 +339,10 @@
     "fpr": 0.1173,
     "balanced_accuracy": 0.8809
   },
-  "TB02_power_target_30min_xgboost_TB02_30min": {
+  "xgboost_TB02_30min": {
     "turbine_id": "TB02",
     "horizon": "30min",
-    "model": "TB02_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -359,10 +359,10 @@
     "fpr": 0.1225,
     "balanced_accuracy": 0.8778
   },
-  "TB02_power_target_6hour_lightgbm_TB02_6hour": {
+  "lightgbm_TB02_6hour": {
     "turbine_id": "TB02",
     "horizon": "6hour",
-    "model": "TB02_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -379,10 +379,10 @@
     "fpr": 0.2323,
     "balanced_accuracy": 0.7821
   },
-  "TB02_power_target_6hour_xgboost_TB02_6hour": {
+  "xgboost_TB02_6hour": {
     "turbine_id": "TB02",
     "horizon": "6hour",
-    "model": "TB02_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB02 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21047,
@@ -399,10 +399,10 @@
     "fpr": 0.287,
     "balanced_accuracy": 0.768
   },
-  "TB03_power_target_10min_lightgbm_TB03_10min": {
+  "lightgbm_TB03_10min": {
     "turbine_id": "TB03",
     "horizon": "10min",
-    "model": "TB03_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -419,10 +419,10 @@
     "fpr": 0.0924,
     "balanced_accuracy": 0.9122
   },
-  "TB03_power_target_10min_xgboost_TB03_10min": {
+  "xgboost_TB03_10min": {
     "turbine_id": "TB03",
     "horizon": "10min",
-    "model": "TB03_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -439,10 +439,10 @@
     "fpr": 0.1075,
     "balanced_accuracy": 0.9063
   },
-  "TB03_power_target_1hour_lightgbm_TB03_1hour": {
+  "lightgbm_TB03_1hour": {
     "turbine_id": "TB03",
     "horizon": "1hour",
-    "model": "TB03_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -459,10 +459,10 @@
     "fpr": 0.1488,
     "balanced_accuracy": 0.8658
   },
-  "TB03_power_target_1hour_xgboost_TB03_1hour": {
+  "xgboost_TB03_1hour": {
     "turbine_id": "TB03",
     "horizon": "1hour",
-    "model": "TB03_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -479,10 +479,10 @@
     "fpr": 0.182,
     "balanced_accuracy": 0.8503
   },
-  "TB03_power_target_24hour_lightgbm_TB03_24hour": {
+  "lightgbm_TB03_24hour": {
     "turbine_id": "TB03",
     "horizon": "24hour",
-    "model": "TB03_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -499,10 +499,10 @@
     "fpr": 0.1866,
     "balanced_accuracy": 0.8099
   },
-  "TB03_power_target_24hour_xgboost_TB03_24hour": {
+  "xgboost_TB03_24hour": {
     "turbine_id": "TB03",
     "horizon": "24hour",
-    "model": "TB03_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -519,10 +519,10 @@
     "fpr": 0.2055,
     "balanced_accuracy": 0.8145
   },
-  "TB03_power_target_30min_lightgbm_TB03_30min": {
+  "lightgbm_TB03_30min": {
     "turbine_id": "TB03",
     "horizon": "30min",
-    "model": "TB03_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -539,10 +539,10 @@
     "fpr": 0.1087,
     "balanced_accuracy": 0.8902
   },
-  "TB03_power_target_30min_xgboost_TB03_30min": {
+  "xgboost_TB03_30min": {
     "turbine_id": "TB03",
     "horizon": "30min",
-    "model": "TB03_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -559,10 +559,10 @@
     "fpr": 0.1391,
     "balanced_accuracy": 0.8751
   },
-  "TB03_power_target_6hour_lightgbm_TB03_6hour": {
+  "lightgbm_TB03_6hour": {
     "turbine_id": "TB03",
     "horizon": "6hour",
-    "model": "TB03_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -579,10 +579,10 @@
     "fpr": 0.2257,
     "balanced_accuracy": 0.7826
   },
-  "TB03_power_target_6hour_xgboost_TB03_6hour": {
+  "xgboost_TB03_6hour": {
     "turbine_id": "TB03",
     "horizon": "6hour",
-    "model": "TB03_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB03 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21243,
@@ -599,10 +599,10 @@
     "fpr": 0.2674,
     "balanced_accuracy": 0.7721
   },
-  "TB04_power_target_10min_lightgbm_TB04_10min": {
+  "lightgbm_TB04_10min": {
     "turbine_id": "TB04",
     "horizon": "10min",
-    "model": "TB04_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -619,10 +619,10 @@
     "fpr": 0.0836,
     "balanced_accuracy": 0.9183
   },
-  "TB04_power_target_10min_xgboost_TB04_10min": {
+  "xgboost_TB04_10min": {
     "turbine_id": "TB04",
     "horizon": "10min",
-    "model": "TB04_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -639,10 +639,10 @@
     "fpr": 0.0988,
     "balanced_accuracy": 0.9082
   },
-  "TB04_power_target_1hour_lightgbm_TB04_1hour": {
+  "lightgbm_TB04_1hour": {
     "turbine_id": "TB04",
     "horizon": "1hour",
-    "model": "TB04_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -659,10 +659,10 @@
     "fpr": 0.1385,
     "balanced_accuracy": 0.8704
   },
-  "TB04_power_target_1hour_xgboost_TB04_1hour": {
+  "xgboost_TB04_1hour": {
     "turbine_id": "TB04",
     "horizon": "1hour",
-    "model": "TB04_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -679,10 +679,10 @@
     "fpr": 0.1562,
     "balanced_accuracy": 0.8625
   },
-  "TB04_power_target_24hour_lightgbm_TB04_24hour": {
+  "lightgbm_TB04_24hour": {
     "turbine_id": "TB04",
     "horizon": "24hour",
-    "model": "TB04_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -699,10 +699,10 @@
     "fpr": 0.1886,
     "balanced_accuracy": 0.8154
   },
-  "TB04_power_target_24hour_xgboost_TB04_24hour": {
+  "xgboost_TB04_24hour": {
     "turbine_id": "TB04",
     "horizon": "24hour",
-    "model": "TB04_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -719,10 +719,10 @@
     "fpr": 0.2094,
     "balanced_accuracy": 0.8212
   },
-  "TB04_power_target_30min_lightgbm_TB04_30min": {
+  "lightgbm_TB04_30min": {
     "turbine_id": "TB04",
     "horizon": "30min",
-    "model": "TB04_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -739,10 +739,10 @@
     "fpr": 0.1289,
     "balanced_accuracy": 0.8802
   },
-  "TB04_power_target_30min_xgboost_TB04_30min": {
+  "xgboost_TB04_30min": {
     "turbine_id": "TB04",
     "horizon": "30min",
-    "model": "TB04_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -759,10 +759,10 @@
     "fpr": 0.1382,
     "balanced_accuracy": 0.8759
   },
-  "TB04_power_target_6hour_lightgbm_TB04_6hour": {
+  "lightgbm_TB04_6hour": {
     "turbine_id": "TB04",
     "horizon": "6hour",
-    "model": "TB04_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -779,10 +779,10 @@
     "fpr": 0.223,
     "balanced_accuracy": 0.789
   },
-  "TB04_power_target_6hour_xgboost_TB04_6hour": {
+  "xgboost_TB04_6hour": {
     "turbine_id": "TB04",
     "horizon": "6hour",
-    "model": "TB04_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB04 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21220,
@@ -799,10 +799,10 @@
     "fpr": 0.276,
     "balanced_accuracy": 0.7783
   },
-  "TB05_power_target_10min_lightgbm_TB05_10min": {
+  "lightgbm_TB05_10min": {
     "turbine_id": "TB05",
     "horizon": "10min",
-    "model": "TB05_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -819,10 +819,10 @@
     "fpr": 0.1164,
     "balanced_accuracy": 0.9042
   },
-  "TB05_power_target_10min_xgboost_TB05_10min": {
+  "xgboost_TB05_10min": {
     "turbine_id": "TB05",
     "horizon": "10min",
-    "model": "TB05_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -839,10 +839,10 @@
     "fpr": 0.1352,
     "balanced_accuracy": 0.8964
   },
-  "TB05_power_target_1hour_lightgbm_TB05_1hour": {
+  "lightgbm_TB05_1hour": {
     "turbine_id": "TB05",
     "horizon": "1hour",
-    "model": "TB05_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -859,10 +859,10 @@
     "fpr": 0.1648,
     "balanced_accuracy": 0.8619
   },
-  "TB05_power_target_1hour_xgboost_TB05_1hour": {
+  "xgboost_TB05_1hour": {
     "turbine_id": "TB05",
     "horizon": "1hour",
-    "model": "TB05_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -879,10 +879,10 @@
     "fpr": 0.1649,
     "balanced_accuracy": 0.8615
   },
-  "TB05_power_target_24hour_lightgbm_TB05_24hour": {
+  "lightgbm_TB05_24hour": {
     "turbine_id": "TB05",
     "horizon": "24hour",
-    "model": "TB05_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -899,10 +899,10 @@
     "fpr": 0.2058,
     "balanced_accuracy": 0.7944
   },
-  "TB05_power_target_24hour_xgboost_TB05_24hour": {
+  "xgboost_TB05_24hour": {
     "turbine_id": "TB05",
     "horizon": "24hour",
-    "model": "TB05_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -919,10 +919,10 @@
     "fpr": 0.23,
     "balanced_accuracy": 0.8051
   },
-  "TB05_power_target_30min_lightgbm_TB05_30min": {
+  "lightgbm_TB05_30min": {
     "turbine_id": "TB05",
     "horizon": "30min",
-    "model": "TB05_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -939,10 +939,10 @@
     "fpr": 0.1469,
     "balanced_accuracy": 0.8782
   },
-  "TB05_power_target_30min_xgboost_TB05_30min": {
+  "xgboost_TB05_30min": {
     "turbine_id": "TB05",
     "horizon": "30min",
-    "model": "TB05_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -959,10 +959,10 @@
     "fpr": 0.178,
     "balanced_accuracy": 0.8616
   },
-  "TB05_power_target_6hour_lightgbm_TB05_6hour": {
+  "lightgbm_TB05_6hour": {
     "turbine_id": "TB05",
     "horizon": "6hour",
-    "model": "TB05_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -979,10 +979,10 @@
     "fpr": 0.2609,
     "balanced_accuracy": 0.7789
   },
-  "TB05_power_target_6hour_xgboost_TB05_6hour": {
+  "xgboost_TB05_6hour": {
     "turbine_id": "TB05",
     "horizon": "6hour",
-    "model": "TB05_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB05 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20359,
@@ -999,10 +999,10 @@
     "fpr": 0.2966,
     "balanced_accuracy": 0.7647
   },
-  "TB06_power_target_10min_lightgbm_TB06_10min": {
+  "lightgbm_TB06_10min": {
     "turbine_id": "TB06",
     "horizon": "10min",
-    "model": "TB06_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1019,10 +1019,10 @@
     "fpr": 0.0801,
     "balanced_accuracy": 0.9154
   },
-  "TB06_power_target_10min_xgboost_TB06_10min": {
+  "xgboost_TB06_10min": {
     "turbine_id": "TB06",
     "horizon": "10min",
-    "model": "TB06_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1039,10 +1039,10 @@
     "fpr": 0.0822,
     "balanced_accuracy": 0.9121
   },
-  "TB06_power_target_1hour_lightgbm_TB06_1hour": {
+  "lightgbm_TB06_1hour": {
     "turbine_id": "TB06",
     "horizon": "1hour",
-    "model": "TB06_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1059,10 +1059,10 @@
     "fpr": 0.129,
     "balanced_accuracy": 0.8658
   },
-  "TB06_power_target_1hour_xgboost_TB06_1hour": {
+  "xgboost_TB06_1hour": {
     "turbine_id": "TB06",
     "horizon": "1hour",
-    "model": "TB06_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1079,10 +1079,10 @@
     "fpr": 0.1616,
     "balanced_accuracy": 0.8496
   },
-  "TB06_power_target_24hour_lightgbm_TB06_24hour": {
+  "lightgbm_TB06_24hour": {
     "turbine_id": "TB06",
     "horizon": "24hour",
-    "model": "TB06_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1099,10 +1099,10 @@
     "fpr": 0.1739,
     "balanced_accuracy": 0.8092
   },
-  "TB06_power_target_24hour_xgboost_TB06_24hour": {
+  "xgboost_TB06_24hour": {
     "turbine_id": "TB06",
     "horizon": "24hour",
-    "model": "TB06_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1119,10 +1119,10 @@
     "fpr": 0.205,
     "balanced_accuracy": 0.816
   },
-  "TB06_power_target_30min_lightgbm_TB06_30min": {
+  "lightgbm_TB06_30min": {
     "turbine_id": "TB06",
     "horizon": "30min",
-    "model": "TB06_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1139,10 +1139,10 @@
     "fpr": 0.1236,
     "balanced_accuracy": 0.8736
   },
-  "TB06_power_target_30min_xgboost_TB06_30min": {
+  "xgboost_TB06_30min": {
     "turbine_id": "TB06",
     "horizon": "30min",
-    "model": "TB06_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1159,10 +1159,10 @@
     "fpr": 0.125,
     "balanced_accuracy": 0.874
   },
-  "TB06_power_target_6hour_lightgbm_TB06_6hour": {
+  "lightgbm_TB06_6hour": {
     "turbine_id": "TB06",
     "horizon": "6hour",
-    "model": "TB06_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1179,10 +1179,10 @@
     "fpr": 0.2162,
     "balanced_accuracy": 0.7822
   },
-  "TB06_power_target_6hour_xgboost_TB06_6hour": {
+  "xgboost_TB06_6hour": {
     "turbine_id": "TB06",
     "horizon": "6hour",
-    "model": "TB06_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB06 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 21041,
@@ -1199,10 +1199,10 @@
     "fpr": 0.2453,
     "balanced_accuracy": 0.7847
   },
-  "TB07_power_target_10min_lightgbm_TB07_10min": {
+  "lightgbm_TB07_10min": {
     "turbine_id": "TB07",
     "horizon": "10min",
-    "model": "TB07_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1219,10 +1219,10 @@
     "fpr": 0.0889,
     "balanced_accuracy": 0.9138
   },
-  "TB07_power_target_10min_xgboost_TB07_10min": {
+  "xgboost_TB07_10min": {
     "turbine_id": "TB07",
     "horizon": "10min",
-    "model": "TB07_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1239,10 +1239,10 @@
     "fpr": 0.0994,
     "balanced_accuracy": 0.9061
   },
-  "TB07_power_target_1hour_lightgbm_TB07_1hour": {
+  "lightgbm_TB07_1hour": {
     "turbine_id": "TB07",
     "horizon": "1hour",
-    "model": "TB07_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1259,10 +1259,10 @@
     "fpr": 0.1292,
     "balanced_accuracy": 0.8695
   },
-  "TB07_power_target_1hour_xgboost_TB07_1hour": {
+  "xgboost_TB07_1hour": {
     "turbine_id": "TB07",
     "horizon": "1hour",
-    "model": "TB07_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1279,10 +1279,10 @@
     "fpr": 0.1325,
     "balanced_accuracy": 0.8672
   },
-  "TB07_power_target_24hour_lightgbm_TB07_24hour": {
+  "lightgbm_TB07_24hour": {
     "turbine_id": "TB07",
     "horizon": "24hour",
-    "model": "TB07_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1299,10 +1299,10 @@
     "fpr": 0.1928,
     "balanced_accuracy": 0.805
   },
-  "TB07_power_target_24hour_xgboost_TB07_24hour": {
+  "xgboost_TB07_24hour": {
     "turbine_id": "TB07",
     "horizon": "24hour",
-    "model": "TB07_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1319,10 +1319,10 @@
     "fpr": 0.2153,
     "balanced_accuracy": 0.8088
   },
-  "TB07_power_target_30min_lightgbm_TB07_30min": {
+  "lightgbm_TB07_30min": {
     "turbine_id": "TB07",
     "horizon": "30min",
-    "model": "TB07_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1339,10 +1339,10 @@
     "fpr": 0.1206,
     "balanced_accuracy": 0.8813
   },
-  "TB07_power_target_30min_xgboost_TB07_30min": {
+  "xgboost_TB07_30min": {
     "turbine_id": "TB07",
     "horizon": "30min",
-    "model": "TB07_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1359,10 +1359,10 @@
     "fpr": 0.1404,
     "balanced_accuracy": 0.8688
   },
-  "TB07_power_target_6hour_lightgbm_TB07_6hour": {
+  "lightgbm_TB07_6hour": {
     "turbine_id": "TB07",
     "horizon": "6hour",
-    "model": "TB07_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1379,10 +1379,10 @@
     "fpr": 0.2262,
     "balanced_accuracy": 0.7759
   },
-  "TB07_power_target_6hour_xgboost_TB07_6hour": {
+  "xgboost_TB07_6hour": {
     "turbine_id": "TB07",
     "horizon": "6hour",
-    "model": "TB07_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB07 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20893,
@@ -1399,10 +1399,10 @@
     "fpr": 0.2676,
     "balanced_accuracy": 0.7736
   },
-  "TB08_power_target_10min_lightgbm_TB08_10min": {
+  "lightgbm_TB08_10min": {
     "turbine_id": "TB08",
     "horizon": "10min",
-    "model": "TB08_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1419,10 +1419,10 @@
     "fpr": 0.0792,
     "balanced_accuracy": 0.9138
   },
-  "TB08_power_target_10min_xgboost_TB08_10min": {
+  "xgboost_TB08_10min": {
     "turbine_id": "TB08",
     "horizon": "10min",
-    "model": "TB08_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1439,10 +1439,10 @@
     "fpr": 0.0807,
     "balanced_accuracy": 0.9125
   },
-  "TB08_power_target_1hour_lightgbm_TB08_1hour": {
+  "lightgbm_TB08_1hour": {
     "turbine_id": "TB08",
     "horizon": "1hour",
-    "model": "TB08_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1459,10 +1459,10 @@
     "fpr": 0.1157,
     "balanced_accuracy": 0.8758
   },
-  "TB08_power_target_1hour_xgboost_TB08_1hour": {
+  "xgboost_TB08_1hour": {
     "turbine_id": "TB08",
     "horizon": "1hour",
-    "model": "TB08_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1479,10 +1479,10 @@
     "fpr": 0.1645,
     "balanced_accuracy": 0.8553
   },
-  "TB08_power_target_24hour_lightgbm_TB08_24hour": {
+  "lightgbm_TB08_24hour": {
     "turbine_id": "TB08",
     "horizon": "24hour",
-    "model": "TB08_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1499,10 +1499,10 @@
     "fpr": 0.187,
     "balanced_accuracy": 0.8112
   },
-  "TB08_power_target_24hour_xgboost_TB08_24hour": {
+  "xgboost_TB08_24hour": {
     "turbine_id": "TB08",
     "horizon": "24hour",
-    "model": "TB08_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1519,10 +1519,10 @@
     "fpr": 0.208,
     "balanced_accuracy": 0.815
   },
-  "TB08_power_target_30min_lightgbm_TB08_30min": {
+  "lightgbm_TB08_30min": {
     "turbine_id": "TB08",
     "horizon": "30min",
-    "model": "TB08_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1539,10 +1539,10 @@
     "fpr": 0.1195,
     "balanced_accuracy": 0.8789
   },
-  "TB08_power_target_30min_xgboost_TB08_30min": {
+  "xgboost_TB08_30min": {
     "turbine_id": "TB08",
     "horizon": "30min",
-    "model": "TB08_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1559,10 +1559,10 @@
     "fpr": 0.1252,
     "balanced_accuracy": 0.8743
   },
-  "TB08_power_target_6hour_lightgbm_TB08_6hour": {
+  "lightgbm_TB08_6hour": {
     "turbine_id": "TB08",
     "horizon": "6hour",
-    "model": "TB08_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1579,10 +1579,10 @@
     "fpr": 0.2217,
     "balanced_accuracy": 0.7782
   },
-  "TB08_power_target_6hour_xgboost_TB08_6hour": {
+  "xgboost_TB08_6hour": {
     "turbine_id": "TB08",
     "horizon": "6hour",
-    "model": "TB08_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB08 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20774,
@@ -1599,10 +1599,10 @@
     "fpr": 0.2624,
     "balanced_accuracy": 0.7744
   },
-  "TB09_power_target_10min_lightgbm_TB09_10min": {
+  "lightgbm_TB09_10min": {
     "turbine_id": "TB09",
     "horizon": "10min",
-    "model": "TB09_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1619,10 +1619,10 @@
     "fpr": 0.0874,
     "balanced_accuracy": 0.9115
   },
-  "TB09_power_target_10min_xgboost_TB09_10min": {
+  "xgboost_TB09_10min": {
     "turbine_id": "TB09",
     "horizon": "10min",
-    "model": "TB09_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1639,10 +1639,10 @@
     "fpr": 0.1059,
     "balanced_accuracy": 0.9037
   },
-  "TB09_power_target_1hour_lightgbm_TB09_1hour": {
+  "lightgbm_TB09_1hour": {
     "turbine_id": "TB09",
     "horizon": "1hour",
-    "model": "TB09_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1659,10 +1659,10 @@
     "fpr": 0.1346,
     "balanced_accuracy": 0.8701
   },
-  "TB09_power_target_1hour_xgboost_TB09_1hour": {
+  "xgboost_TB09_1hour": {
     "turbine_id": "TB09",
     "horizon": "1hour",
-    "model": "TB09_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1679,10 +1679,10 @@
     "fpr": 0.1426,
     "balanced_accuracy": 0.8672
   },
-  "TB09_power_target_24hour_lightgbm_TB09_24hour": {
+  "lightgbm_TB09_24hour": {
     "turbine_id": "TB09",
     "horizon": "24hour",
-    "model": "TB09_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1699,10 +1699,10 @@
     "fpr": 0.1998,
     "balanced_accuracy": 0.8116
   },
-  "TB09_power_target_24hour_xgboost_TB09_24hour": {
+  "xgboost_TB09_24hour": {
     "turbine_id": "TB09",
     "horizon": "24hour",
-    "model": "TB09_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1719,10 +1719,10 @@
     "fpr": 0.2215,
     "balanced_accuracy": 0.8134
   },
-  "TB09_power_target_30min_lightgbm_TB09_30min": {
+  "lightgbm_TB09_30min": {
     "turbine_id": "TB09",
     "horizon": "30min",
-    "model": "TB09_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1739,10 +1739,10 @@
     "fpr": 0.1249,
     "balanced_accuracy": 0.8798
   },
-  "TB09_power_target_30min_xgboost_TB09_30min": {
+  "xgboost_TB09_30min": {
     "turbine_id": "TB09",
     "horizon": "30min",
-    "model": "TB09_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1759,10 +1759,10 @@
     "fpr": 0.1363,
     "balanced_accuracy": 0.8755
   },
-  "TB09_power_target_6hour_lightgbm_TB09_6hour": {
+  "lightgbm_TB09_6hour": {
     "turbine_id": "TB09",
     "horizon": "6hour",
-    "model": "TB09_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1779,10 +1779,10 @@
     "fpr": 0.2598,
     "balanced_accuracy": 0.7531
   },
-  "TB09_power_target_6hour_xgboost_TB09_6hour": {
+  "xgboost_TB09_6hour": {
     "turbine_id": "TB09",
     "horizon": "6hour",
-    "model": "TB09_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB09 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20453,
@@ -1799,10 +1799,10 @@
     "fpr": 0.2756,
     "balanced_accuracy": 0.7527
   },
-  "TB10_power_target_10min_lightgbm_TB10_10min": {
+  "lightgbm_TB10_10min": {
     "turbine_id": "TB10",
     "horizon": "10min",
-    "model": "TB10_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1819,10 +1819,10 @@
     "fpr": 0.0826,
     "balanced_accuracy": 0.9149
   },
-  "TB10_power_target_10min_xgboost_TB10_10min": {
+  "xgboost_TB10_10min": {
     "turbine_id": "TB10",
     "horizon": "10min",
-    "model": "TB10_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1839,10 +1839,10 @@
     "fpr": 0.0891,
     "balanced_accuracy": 0.9139
   },
-  "TB10_power_target_1hour_lightgbm_TB10_1hour": {
+  "lightgbm_TB10_1hour": {
     "turbine_id": "TB10",
     "horizon": "1hour",
-    "model": "TB10_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1859,10 +1859,10 @@
     "fpr": 0.1013,
     "balanced_accuracy": 0.887
   },
-  "TB10_power_target_1hour_xgboost_TB10_1hour": {
+  "xgboost_TB10_1hour": {
     "turbine_id": "TB10",
     "horizon": "1hour",
-    "model": "TB10_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1879,10 +1879,10 @@
     "fpr": 0.1664,
     "balanced_accuracy": 0.8576
   },
-  "TB10_power_target_24hour_lightgbm_TB10_24hour": {
+  "lightgbm_TB10_24hour": {
     "turbine_id": "TB10",
     "horizon": "24hour",
-    "model": "TB10_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1899,10 +1899,10 @@
     "fpr": 0.1815,
     "balanced_accuracy": 0.8081
   },
-  "TB10_power_target_24hour_xgboost_TB10_24hour": {
+  "xgboost_TB10_24hour": {
     "turbine_id": "TB10",
     "horizon": "24hour",
-    "model": "TB10_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1919,10 +1919,10 @@
     "fpr": 0.2154,
     "balanced_accuracy": 0.8068
   },
-  "TB10_power_target_30min_lightgbm_TB10_30min": {
+  "lightgbm_TB10_30min": {
     "turbine_id": "TB10",
     "horizon": "30min",
-    "model": "TB10_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1939,10 +1939,10 @@
     "fpr": 0.1214,
     "balanced_accuracy": 0.8812
   },
-  "TB10_power_target_30min_xgboost_TB10_30min": {
+  "xgboost_TB10_30min": {
     "turbine_id": "TB10",
     "horizon": "30min",
-    "model": "TB10_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1959,10 +1959,10 @@
     "fpr": 0.1225,
     "balanced_accuracy": 0.8822
   },
-  "TB10_power_target_6hour_lightgbm_TB10_6hour": {
+  "lightgbm_TB10_6hour": {
     "turbine_id": "TB10",
     "horizon": "6hour",
-    "model": "TB10_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1979,10 +1979,10 @@
     "fpr": 0.2079,
     "balanced_accuracy": 0.7764
   },
-  "TB10_power_target_6hour_xgboost_TB10_6hour": {
+  "xgboost_TB10_6hour": {
     "turbine_id": "TB10",
     "horizon": "6hour",
-    "model": "TB10_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB10 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20899,
@@ -1999,10 +1999,10 @@
     "fpr": 0.2618,
     "balanced_accuracy": 0.7696
   },
-  "TB11_power_target_10min_lightgbm_TB11_10min": {
+  "lightgbm_TB11_10min": {
     "turbine_id": "TB11",
     "horizon": "10min",
-    "model": "TB11_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2019,10 +2019,10 @@
     "fpr": 0.0753,
     "balanced_accuracy": 0.9188
   },
-  "TB11_power_target_10min_xgboost_TB11_10min": {
+  "xgboost_TB11_10min": {
     "turbine_id": "TB11",
     "horizon": "10min",
-    "model": "TB11_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2039,10 +2039,10 @@
     "fpr": 0.0809,
     "balanced_accuracy": 0.9171
   },
-  "TB11_power_target_1hour_lightgbm_TB11_1hour": {
+  "lightgbm_TB11_1hour": {
     "turbine_id": "TB11",
     "horizon": "1hour",
-    "model": "TB11_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2059,10 +2059,10 @@
     "fpr": 0.1182,
     "balanced_accuracy": 0.8797
   },
-  "TB11_power_target_1hour_xgboost_TB11_1hour": {
+  "xgboost_TB11_1hour": {
     "turbine_id": "TB11",
     "horizon": "1hour",
-    "model": "TB11_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2079,10 +2079,10 @@
     "fpr": 0.1586,
     "balanced_accuracy": 0.86
   },
-  "TB11_power_target_24hour_lightgbm_TB11_24hour": {
+  "lightgbm_TB11_24hour": {
     "turbine_id": "TB11",
     "horizon": "24hour",
-    "model": "TB11_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2099,10 +2099,10 @@
     "fpr": 0.1992,
     "balanced_accuracy": 0.8037
   },
-  "TB11_power_target_24hour_xgboost_TB11_24hour": {
+  "xgboost_TB11_24hour": {
     "turbine_id": "TB11",
     "horizon": "24hour",
-    "model": "TB11_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2119,10 +2119,10 @@
     "fpr": 0.2236,
     "balanced_accuracy": 0.8088
   },
-  "TB11_power_target_30min_lightgbm_TB11_30min": {
+  "lightgbm_TB11_30min": {
     "turbine_id": "TB11",
     "horizon": "30min",
-    "model": "TB11_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2139,10 +2139,10 @@
     "fpr": 0.1309,
     "balanced_accuracy": 0.8766
   },
-  "TB11_power_target_30min_xgboost_TB11_30min": {
+  "xgboost_TB11_30min": {
     "turbine_id": "TB11",
     "horizon": "30min",
-    "model": "TB11_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2159,10 +2159,10 @@
     "fpr": 0.1391,
     "balanced_accuracy": 0.872
   },
-  "TB11_power_target_6hour_lightgbm_TB11_6hour": {
+  "lightgbm_TB11_6hour": {
     "turbine_id": "TB11",
     "horizon": "6hour",
-    "model": "TB11_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2179,10 +2179,10 @@
     "fpr": 0.2386,
     "balanced_accuracy": 0.7643
   },
-  "TB11_power_target_6hour_xgboost_TB11_6hour": {
+  "xgboost_TB11_6hour": {
     "turbine_id": "TB11",
     "horizon": "6hour",
-    "model": "TB11_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB11 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 20803,
@@ -2199,10 +2199,10 @@
     "fpr": 0.2841,
     "balanced_accuracy": 0.7614
   },
-  "TB12_power_target_10min_lightgbm_TB12_10min": {
+  "lightgbm_TB12_10min": {
     "turbine_id": "TB12",
     "horizon": "10min",
-    "model": "TB12_power_target_10min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2219,10 +2219,10 @@
     "fpr": 0.1618,
     "balanced_accuracy": 0.8764
   },
-  "TB12_power_target_10min_xgboost_TB12_10min": {
+  "xgboost_TB12_10min": {
     "turbine_id": "TB12",
     "horizon": "10min",
-    "model": "TB12_power_target_10min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2239,10 +2239,10 @@
     "fpr": 0.1626,
     "balanced_accuracy": 0.8742
   },
-  "TB12_power_target_1hour_lightgbm_TB12_1hour": {
+  "lightgbm_TB12_1hour": {
     "turbine_id": "TB12",
     "horizon": "1hour",
-    "model": "TB12_power_target_1hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2259,10 +2259,10 @@
     "fpr": 0.1974,
     "balanced_accuracy": 0.8306
   },
-  "TB12_power_target_1hour_xgboost_TB12_1hour": {
+  "xgboost_TB12_1hour": {
     "turbine_id": "TB12",
     "horizon": "1hour",
-    "model": "TB12_power_target_1hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2279,10 +2279,10 @@
     "fpr": 0.2404,
     "balanced_accuracy": 0.8121
   },
-  "TB12_power_target_24hour_lightgbm_TB12_24hour": {
+  "lightgbm_TB12_24hour": {
     "turbine_id": "TB12",
     "horizon": "24hour",
-    "model": "TB12_power_target_24hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2299,10 +2299,10 @@
     "fpr": 0.2531,
     "balanced_accuracy": 0.769
   },
-  "TB12_power_target_24hour_xgboost_TB12_24hour": {
+  "xgboost_TB12_24hour": {
     "turbine_id": "TB12",
     "horizon": "24hour",
-    "model": "TB12_power_target_24hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2319,10 +2319,10 @@
     "fpr": 0.2766,
     "balanced_accuracy": 0.7795
   },
-  "TB12_power_target_30min_lightgbm_TB12_30min": {
+  "lightgbm_TB12_30min": {
     "turbine_id": "TB12",
     "horizon": "30min",
-    "model": "TB12_power_target_30min_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2339,10 +2339,10 @@
     "fpr": 0.2037,
     "balanced_accuracy": 0.8358
   },
-  "TB12_power_target_30min_xgboost_TB12_30min": {
+  "xgboost_TB12_30min": {
     "turbine_id": "TB12",
     "horizon": "30min",
-    "model": "TB12_power_target_30min_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2359,10 +2359,10 @@
     "fpr": 0.2198,
     "balanced_accuracy": 0.8283
   },
-  "TB12_power_target_6hour_lightgbm_TB12_6hour": {
+  "lightgbm_TB12_6hour": {
     "turbine_id": "TB12",
     "horizon": "6hour",
-    "model": "TB12_power_target_6hour_lightgbm",
+    "model": "lightgbm",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,
@@ -2379,10 +2379,10 @@
     "fpr": 0.2909,
     "balanced_accuracy": 0.7366
   },
-  "TB12_power_target_6hour_xgboost_TB12_6hour": {
+  "xgboost_TB12_6hour": {
     "turbine_id": "TB12",
     "horizon": "6hour",
-    "model": "TB12_power_target_6hour_xgboost",
+    "model": "xgboost",
     "definition": "Ramp event = |power_change| > 50% of rated per 10min. Ground truth from actual TB12 power. TP=alarm+event, FP=alarm+no_event, FN=no_alarm+event, TN=no_alarm+no_event",
     "threshold_pct": 50.0,
     "n_actual_events": 17966,

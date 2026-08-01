@@ -196,12 +196,17 @@ def append_baseline_rows(results_df: pd.DataFrame, test_data: pd.DataFrame,
         actual = test_data[target].values
         base = target.replace(f"_target_{horizon}", "") if horizon != "unknown" else target
 
-        for mdl_name, pred_key in [("persistence", "persistence"), ("ridge", "ridge")]:
-            pred_map = baseline_predictions if mdl_name == "persistence" else ridge_predictions
-            preds = np.asarray(pred_map.get(target, []), dtype=float)
-            if preds is None or len(preds) == 0:
+        persist_preds = np.asarray(baseline_predictions.get(target, []), dtype=float)[:len(actual)]
+        ridge_preds = np.asarray(ridge_predictions.get(target, []), dtype=float)[:len(actual)]
+
+        # Skill is meaningful only relative to the OTHER baseline on the SAME samples.
+        # persistence vs itself = 0.0; ridge vs persistence = SS(ridge_rmse, persist_rmse).
+        for mdl_name, preds, other in [
+            ("persistence", persist_preds, ridge_preds),
+            ("ridge", ridge_preds, persist_preds),
+        ]:
+            if len(preds) == 0:
                 continue
-            preds = preds[:len(actual)]
             valid = ~(np.isnan(actual) | np.isnan(preds))
             if valid.sum() == 0:
                 continue
@@ -209,6 +214,22 @@ def append_baseline_rows(results_df: pd.DataFrame, test_data: pd.DataFrame,
             m = compute_metrics(actual, preds, rated_power)
             cap_mask = (actual >= rated_power * 0.95) & valid
             zero_mask = (actual <= rated_power * 0.01) & valid
+
+            skill_other = np.nan
+            if len(other) > 0:
+                both = valid & ~np.isnan(other)
+                if both.sum() > 0:
+                    skill_other = compute_skill_score(
+                        _rmse(actual[both], preds[both]),
+                        _rmse(actual[both], other[both]))
+            if mdl_name == "ridge":
+                skill_score = skill_other
+                skill_vs_persistence = skill_other
+                skill_vs_ridge = 0.0
+            else:
+                skill_score = 0.0
+                skill_vs_persistence = 0.0
+                skill_vs_ridge = skill_other
             rows.append({
                 "target": target,
                 "model": mdl_name,
@@ -220,9 +241,9 @@ def append_baseline_rows(results_df: pd.DataFrame, test_data: pd.DataFrame,
                 "bias": m["bias"],
                 "r2": m["r2"],
                 "max_error": m["max_error"],
-                "skill_score": np.nan,
-                "skill_vs_persistence": np.nan,
-                "skill_vs_ridge": np.nan,
+                "skill_score": skill_score,
+                "skill_vs_persistence": skill_vs_persistence,
+                "skill_vs_ridge": skill_vs_ridge,
                 "rmse_excl_capacity_zero": np.nan,
                 "n_samples": m["n_samples"],
                 "n_at_capacity": int(cap_mask.sum()),
