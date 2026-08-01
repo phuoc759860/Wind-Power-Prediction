@@ -196,7 +196,7 @@ Bước 9 – Kiểm thử phần mềm: Chạy unit test, integration test, sch
 Bước 10 – Tái tạo báo cáo: Mọi bảng và hình phải sinh tự động từ file kết quả của lần chạy cuối. Không nhập tay số liệu.
 6. CẤU TRÚC KẾT QUẢ PHẢI NỘP LẠI
 Sinh viên nộp lại theo đúng cấu trúc thư mục sau:
-AMG_Wind_Forecasting_Revision/├── 01_raw_data_manifest/│   ├── data_manifest.csv│   └── checksums.txt├── 02_source_code/│   ├── src/│   ├── configs/│   ├── tests/│   ├── main.py│   └── requirements.txt├── 03_audit_evidence/│   ├── timestamp_audit.csv│   ├── leakage_audit.csv│   ├── split_statistics.json│   ├── inventory_summary.json│   └── sample_trace_TB02_24h.csv├── 04_models/├── 05_outputs/│   ├── forecasts/│   ├── metrics/│   └── figures/├── 06_test_reports/│   ├── pytest_report.txt│   ├── api_benchmark.csv│   └── run_log.txt├── 07_report/│   ├── AMG_Wind_Power_Forecasting_Report_Revised.pdf│   └── change_log.docx└── README_REPRODUCE.md
+AMG_Wind_Forecasting_Revision/├── 01_raw_data_manifest/│   ├── data_manifest.csv│   └── checksums.txt├── 02_source_code/│   ├── src/│   ├── configs/│   ├── tests/│   ├── main.py│   └── requirements.txt├── 03_audit_evidence/│   ├── timestamp_audit.csv│   ├── leakage_audit.csv│   ├── split_statistics.json│   ├── inventory_summary.json│   └── sample_trace_TB02_24h.csv├── 04_models/├── 05_outputs/│   ├── forecasts/│   ├── metrics/│   └── figures/├── 06_test_reports/│   ├── pytest_report.txt│   ├── api_benchmark.csv│   └── run_log.txt├── 07_report/│   ├── AMG_Wind_Power_Forecasting_Report_Revised.pdf│   └── change_log.docx└── README.md
 7. BẢNG TIÊU CHÍ NGHIỆM THU LẦN TIẾP THEO
 Mã
 Tiêu chí

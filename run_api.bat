@@ -18,5 +18,13 @@ echo   set MODEL_LOAD_TIMEOUT=30  ^(seconds; slower loads return 503 instead of 
 echo.
 echo Press Ctrl+C to stop
 echo.
-python -m uvicorn src.api:app --host 0.0.0.0 --port 8000
+
+rem Pick a Python that actually has the deps. The default 'python' on some
+rem machines is a dependency-free stub, so prefer the py launcher (3.13)
+rem or an explicit API_PYTHON override, e.g.
+rem   set API_PYTHON=C:\Users\ASUS\...\python3.13.exe
+set "PYTHON_CMD=py -3.13"
+where py >nul 2>&1 || set "PYTHON_CMD=python"
+if defined API_PYTHON set "PYTHON_CMD=%API_PYTHON%"
+%PYTHON_CMD% -m uvicorn src.api:app --host 0.0.0.0 --port 8000
 pause

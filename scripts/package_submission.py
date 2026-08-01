@@ -87,8 +87,8 @@ def main():
     _copy(BASE_DIR / "outputs" / "AMG_Wind_Power_Forecasting_Report_Revised.pdf", r7)
     _copy(BASE_DIR / "data" / "metadata" / "change_log.docx", r7)
 
-    # README_REPRODUCE.md
-    _copy(BASE_DIR / "README_REPRODUCE.md", DEST)
+    # README.md (reproduction guide merged into it)
+    _copy(BASE_DIR / "README.md", DEST)
 
     print(f"Submission packaged at: {DEST}")
 

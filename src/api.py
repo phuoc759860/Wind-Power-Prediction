@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Reque
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
 
 from src.input_manager import (
@@ -357,6 +358,35 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# P2-01 (docs only): declare the HTTP Bearer scheme in the OpenAPI schema so
+# Swagger UI shows the Authorize button. Real auth is STILL enforced by
+# authz_middleware (fail-closed); this only makes the interactive docs able to
+# attach the key, it does not weaken or bypass any security check.
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "bearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "API_KEY",
+            "description": "Value of the API_KEY environment variable the server "
+                           "was started with (no 'Bearer ' prefix needed).",
+        }
+    }
+    schema["security"] = [{"bearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 

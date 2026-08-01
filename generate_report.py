@@ -33,6 +33,9 @@ GRAY_LIGHT = colors.HexColor("#F2F2F2")
 WHITE = colors.white
 BLACK = colors.black
 
+# Usable text width on A4 with 20 mm side margins (keeps every table/figure inside the margins)
+USABLE_WIDTH = 168 * mm
+
 
 def get_styles():
     styles = getSampleStyleSheet()
@@ -52,16 +55,19 @@ def get_styles():
         fontSize=18, leading=22, textColor=BLUE_DARK,
         spaceBefore=12 * mm, spaceAfter=4 * mm,
         borderWidth=0, borderPadding=0,
+        keepWithNext=1,
     ))
     styles.add(ParagraphStyle(
         "SectionH2", parent=styles["Heading2"],
         fontSize=14, leading=18, textColor=BLUE_MED,
         spaceBefore=6 * mm, spaceAfter=3 * mm,
+        keepWithNext=1,
     ))
     styles.add(ParagraphStyle(
         "SectionH3", parent=styles["Heading3"],
         fontSize=12, leading=15, textColor=BLUE_MED,
         spaceBefore=4 * mm, spaceAfter=2 * mm,
+        keepWithNext=1,
     ))
     styles.add(ParagraphStyle("ToCTitle", parent=styles["SectionH1"]))
     styles.add(ParagraphStyle(
@@ -127,6 +133,14 @@ def _make_table(data, col_widths=None, header_color=BLUE_MED):
     for r in data:
         while len(r) < ncols:
             r.append("")
+
+    if col_widths is None:
+        col_widths = [USABLE_WIDTH / ncols] * ncols
+    else:
+        total = sum(col_widths)
+        if abs(total - USABLE_WIDTH) > 0.01:
+            factor = USABLE_WIDTH / total
+            col_widths = [c * factor for c in col_widths]
 
     rows = []
     for r in data:
@@ -204,6 +218,17 @@ class ReportBuilder:
         """Auto-numbered figure caption (P3-01: fixes duplicate 'Figure 3/4/5')."""
         self._fig_counter += 1
         return Paragraph(f"Figure {self._fig_counter}: {text}", self.styles["Caption"])
+
+    def _figure(self, name: str, caption: str, w=160 * mm, h=100 * mm):
+        """Figure + caption kept together on one page (no orphaned captions), width capped to margins."""
+        path = FIG_DIR / name
+        if not path.exists():
+            return Spacer(1, 1)
+        if w > USABLE_WIDTH:
+            w = USABLE_WIDTH
+        self._fig_counter += 1
+        cap = Paragraph(f"Figure {self._fig_counter}: {caption}", self.styles["Caption"])
+        return KeepTogether([Image(str(path), width=w, height=h, kind="proportional"), cap])
 
     def _load_data(self):
         self.eval_df = pd.read_csv(CSV_DIR / "evaluation_metrics.csv") if (CSV_DIR / "evaluation_metrics.csv").exists() else pd.DataFrame()
@@ -375,7 +400,11 @@ class ReportBuilder:
                 "toc_entry", parent=s["BodyText2"], leftIndent=indent,
                 fontSize=10, leading=16, fontName="Helvetica" if num == "" else "Helvetica-Bold",
             )
-            pg = str(_TOC_PAGES.get(_norm_heading(title), ""))
+            # The stored heading key includes the section number (e.g. "1. Executive Summary").
+            key = (f"{num} {title}" if num else title)
+            pg = str(_TOC_PAGES.get(_norm_heading(key), ""))
+            if not pg and num:
+                pg = str(_TOC_PAGES.get(_norm_heading(title), ""))
             if not pg:
                 pg = " "
             dots = "." * (60 - len(title)) if num else "." * (55 - len(title))
@@ -844,8 +873,7 @@ class ReportBuilder:
             ))
 
         self.story.append(Spacer(1, 4 * mm))
-        self.story.append(_fig("01_performance_heatmap.png"))
-        self.story.append(self._caption("Model performance heatmap across turbines and horizons"))
+        self.story.append(self._figure("01_performance_heatmap.png", "Model performance heatmap across turbines and horizons"))
 
         self.story.append(Paragraph("Walk-Forward Validation (Baselines):", s["SectionH3"]))
         self.story.append(Paragraph(
@@ -900,8 +928,7 @@ class ReportBuilder:
                 "<b>Evidence:</b> " + "; ".join(decay_parts[:6]) + ".",
                 s["BodyText2"],
             ))
-        self.story.append(_fig("02_horizon_decay.png"))
-        self.story.append(self._caption("R2 degradation across forecast horizons"))
+        self.story.append(self._figure("02_horizon_decay.png", "R2 degradation across forecast horizons"))
 
         self.story.append(PageBreak())
         self.story.append(Paragraph("5.3  Model Comparison", s["SectionH2"]))
@@ -928,11 +955,8 @@ class ReportBuilder:
                 "XGBoost and LightGBM show comparable performance at short horizons (10-min, 30-min).",
                 s["BodyText2"],
             ))
-        self.story.append(_fig("07_model_comparison.png"))
-        self.story.append(self._caption("XGBoost vs LightGBM comparison by horizon"))
-
-        self.story.append(_fig("06_radar_summary.png"))
-        self.story.append(self._caption("Multi-metric radar comparison of model performance"))
+        self.story.append(self._figure("07_model_comparison.png", "XGBoost vs LightGBM comparison by horizon"))
+        self.story.append(self._figure("06_radar_summary.png", "Multi-metric radar comparison of model performance"))
 
         self.story.append(Paragraph("5.4  Farm-Level Results", s["SectionH2"]))
         self.story.append(Paragraph(
@@ -1015,8 +1039,7 @@ class ReportBuilder:
                 s["BodyText2"],
             ))
             self.story.append(_make_table(bias_rows, col_widths=[18 * mm, 14 * mm, 22 * mm, 26 * mm, 18 * mm, 20 * mm, 18 * mm, 24 * mm]))
-            self.story.append(_fig("25_farm_bias_calibration.png", w=180 * mm, h=70 * mm))
-            self.story.append(self._caption("Farm-level bias vs predicted power with calibration reference (identity line)"))
+            self.story.append(self._figure("25_farm_bias_calibration.png", "Farm-level bias vs predicted power with calibration reference (identity line)", w=180 * mm, h=70 * mm))
         else:
             self.story.append(Paragraph(
                 "Farm bias analysis output not found — run the pipeline to generate farm_bias.csv.",
@@ -1122,8 +1145,7 @@ class ReportBuilder:
             "characteristics across turbines.",
             s["BodyText2"],
         ))
-        self.story.append(_fig("08_horizon_comparison.png"))
-        self.story.append(self._caption("Horizon-wise model performance comparison"))
+        self.story.append(self._figure("08_horizon_comparison.png", "Horizon-wise model performance comparison"))
 
         self.story.append(Paragraph("5.7  Alert Accuracy", s["SectionH2"]))
         self.story.append(Paragraph(
@@ -1182,8 +1204,7 @@ class ReportBuilder:
             "Points close to the diagonal (red dashed line) indicate accurate predictions.",
             s["BodyText2"],
         ))
-        self.story.append(_fig("03_best_model_scatter.png", w=180 * mm, h=55 * mm))
-        self.story.append(self._caption("Best model predicted vs actual scatter by horizon"))
+        self.story.append(self._figure("03_best_model_scatter.png", "Best model predicted vs actual scatter by horizon", w=180 * mm, h=55 * mm))
 
         self.story.append(Paragraph("5.8.2  Error Distribution", s["SectionH3"]))
         self.story.append(Paragraph(
@@ -1191,8 +1212,7 @@ class ReportBuilder:
             "Symmetric distribution centered near zero indicates unbiased forecasts.",
             s["BodyText2"],
         ))
-        self.story.append(_fig("04_error_histogram.png", w=180 * mm, h=55 * mm))
-        self.story.append(self._caption("Prediction error distribution by horizon"))
+        self.story.append(self._figure("04_error_histogram.png", "Prediction error distribution by horizon", w=180 * mm, h=55 * mm))
 
         self.story.append(Paragraph("5.8.3  Residual Analysis", s["SectionH3"]))
         self.story.append(Paragraph(
@@ -1200,8 +1220,7 @@ class ReportBuilder:
             "homoscedasticity. Bottom row: residual density histogram.",
             s["BodyText2"],
         ))
-        self.story.append(_fig("12_residual_analysis.png", w=180 * mm, h=100 * mm))
-        self.story.append(self._caption("Residual analysis — scatter (top) and density (bottom)"))
+        self.story.append(self._figure("12_residual_analysis.png", "Residual analysis — scatter (top) and density (bottom)", w=180 * mm, h=100 * mm))
 
         self.story.append(Paragraph("5.8.4  Error by Operating Regime", s["SectionH3"]))
         self.story.append(Paragraph(
@@ -1209,14 +1228,10 @@ class ReportBuilder:
             "This reveals systematic biases under specific operating conditions.",
             s["BodyText2"],
         ))
-        self.story.append(_fig("13_error_by_wind_speed.png", w=180 * mm, h=55 * mm))
-        self.story.append(self._caption("Prediction error by wind speed bin"))
-        self.story.append(_fig("09_error_by_power_region.png", w=180 * mm, h=55 * mm))
-        self.story.append(self._caption("Prediction error by power output region"))
-        self.story.append(_fig("10_error_by_season.png", w=180 * mm, h=55 * mm))
-        self.story.append(self._caption("Prediction error by season"))
-        self.story.append(_fig("11_error_by_day_night.png", w=180 * mm, h=55 * mm))
-        self.story.append(self._caption("Day vs night error comparison"))
+        self.story.append(self._figure("13_error_by_wind_speed.png", "Prediction error by wind speed bin", w=180 * mm, h=55 * mm))
+        self.story.append(self._figure("09_error_by_power_region.png", "Prediction error by power output region", w=180 * mm, h=55 * mm))
+        self.story.append(self._figure("10_error_by_season.png", "Prediction error by season", w=180 * mm, h=55 * mm))
+        self.story.append(self._figure("11_error_by_day_night.png", "Day vs night error comparison", w=180 * mm, h=55 * mm))
         self.story.append(PageBreak())
 
     def build_backtest_results(self):
@@ -1504,7 +1519,7 @@ class ReportBuilder:
             ["Step", "Command", "Description"],
             ["1", "pip install -r requirements.txt", "Install all dependencies"],
             ["2", "py -3.13 main.py", "Run full pipeline (15 steps: load → audit → validate → train → evaluate → provenance)"],
-            ["3", "uvicorn src.api:app --reload", "Start API server with interactive dashboard"],
+            ["3", "py -3.13 -m uvicorn src.api:app --reload", "Start API server with interactive dashboard"],
             ["4", "pytest tests/ -v", "Run full test suite with verbose output"],
             ["5", "python generate_report.py", "Regenerate this PDF report"],
             ["6", "python generate_outputs.py", "Regenerate all output CSVs + figures + XLSX"],
@@ -1836,7 +1851,7 @@ class ReportBuilder:
             ["A10", "Ramp/anomaly/failure evidence", "alert_accuracy.csv + anomaly_accuracy.csv", "Semantics labeled as heuristic risk scores"],
             ["A11", "API security & benchmark", "tests/test_api.py + logs/api_audit.log", "Env-var key, restricted CORS, /health/ alias"],
             ["A12", "Report auto-generated, no hardcoded numbers", "this PDF + generate_report.py", "All tables read from last pipeline run"],
-            ["A13", "Reproducible from a clean environment", "README + README_REPRODUCE.md + run_all.bat", "run_all.bat: deps -> main.py -> pytest -> generate_report.py -> API"],
+            ["A13", "Reproducible from a clean environment", "README.md + run_all.bat", "run_all.bat: deps -> main.py -> pytest -> generate_report.py -> API"],
         ]
         self.story.append(_make_table(a_rows, col_widths=[14 * mm, 46 * mm, 55 * mm, 35 * mm]))
         self.story.append(PageBreak())
