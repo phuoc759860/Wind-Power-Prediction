@@ -437,10 +437,19 @@ def save_models(trained_models: Dict, output_dir: str, config: Optional[dict] = 
 
     data_hash = None
     if data_path and os.path.exists(data_path):
+        def _hash_stream(path):
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    hasher.update(chunk)
+
         hasher = hashlib.sha256()
-        with open(data_path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                hasher.update(chunk)
+        if os.path.isdir(data_path):
+            for root, _, files in os.walk(data_path):
+                for fn in sorted(files):
+                    hasher.update(fn.encode("utf-8"))
+                    _hash_stream(os.path.join(root, fn))
+        else:
+            _hash_stream(data_path)
         data_hash = hasher.hexdigest()[:16]
 
     python_version = f"{__import__('sys').version_info.major}.{__import__('sys').version_info.minor}.{__import__('sys').version_info.micro}"

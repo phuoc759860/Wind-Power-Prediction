@@ -225,7 +225,8 @@ class ReportBuilder:
         reidx_path = META_DIR / "reindex_additions.json"
         self.reindex = json.load(open(reidx_path)) if reidx_path.exists() else {}
         leak_path = META_DIR / "leakage_audit.csv"
-        self.leakage_df = pd.read_csv(leak_path) if leak_path.exists() else pd.DataFrame()
+        self.leakage_audit_exists = leak_path.exists()
+        self.leakage_df = pd.read_csv(leak_path) if self.leakage_audit_exists else pd.DataFrame()
         hs_path = META_DIR / "horizon_sample_counts.json"
         self.horizon_samples = json.load(open(hs_path)) if hs_path.exists() else {}
         split_path = META_DIR / "split_statistics.json"
@@ -255,7 +256,7 @@ class ReportBuilder:
             self.avg_r2_by_horizon = pd.DataFrame()
             self.best_row = None
         if self.availability:
-            pcts = [v.get("availability_pct", 0) for v in self.availability.values()]
+            pcts = [v.get("observed_availability_pct", 0) for v in self.availability.values()]
             self.avg_availability = sum(pcts) / len(pcts) if pcts else 0
         else:
             self.avg_availability = 0
@@ -573,7 +574,7 @@ class ReportBuilder:
 
         self.story.append(Paragraph("3.3  Turbine Availability", s["SectionH2"]))
         if self.availability:
-            pcts = [(k, v.get("availability_pct", 0)) for k, v in self.availability.items()]
+            pcts = [(k, v.get("observed_availability_pct", 0)) for k, v in self.availability.items()]
             best_tb = max(pcts, key=lambda x: x[1])
             worst_tb = min(pcts, key=lambda x: x[1])
             self.story.append(Paragraph(
@@ -602,7 +603,7 @@ class ReportBuilder:
                         f"{info.get('generating_hours', 0):,.0f}",
                         f"{info.get('stopped_hours', 0):,.0f}",
                         f"{info.get('missing_hours', 0):,.0f}",
-                        f"{info.get('availability_pct', 0):.2f}",
+                        f"{info.get('observed_availability_pct', 0):.2f}",
                     ])
             self.story.append(_make_table(avail_data, col_widths=[22 * mm, 32 * mm, 28 * mm, 28 * mm, 32 * mm]))
 
@@ -1390,7 +1391,7 @@ class ReportBuilder:
             ["data_quality_report.csv", "column, missing_rate_pct,\ninvalid_values, min, max,\nunit, remarks, definition,\ndata_source", f"{_get_row_count('data_quality_report.csv'):,}", "Column-level\ndata quality"],
             ["ramp_alert.csv", "timestamp, ramp_type,\nexpected_change, probability,\nthreshold, affected_turbines", f"{_get_row_count('ramp_alert.csv'):,}", "Ramp events\ndetected"],
             ["failure_risk.csv", "timestamp, turbine_id, component,\nhorizon, stop_risk_score,\nmethod, recommended_action", f"{_get_row_count('failure_risk.csv'):,}", "Turbine failure\nrisk assessment"],
-            ["anomaly_alert.csv", "timestamp, turbine_id,\nanomaly_score, suspected_component,\nevidence", f"{_get_row_count('anomaly_alert.csv'):,}", "Statistical anomalies\n(z > 3.0)"],
+            ["anomaly_alert.csv", "timestamp, turbine_id,\nanomaly_score, suspected_component,\nevidence", f"{_get_row_count('anomaly_alert.csv'):,}", "Heuristic anomaly\nscreening (rules + z > 2.5)"],
             ["temperature_warning.csv", "timestamp, turbine_id,\ntemperature, warning_type,\nseverity, message", f"{_get_row_count('temperature_warning.csv'):,}", "Temperature threshold\nalerts"],
             ["coverage_calibration.csv", "turbine_id, horizon, model,\nnominal_coverage,\nactual_coverage,\ncalibration_error", f"{_get_row_count('coverage_calibration.csv'):,}", "Conformal CI coverage\ncalibration"],
             ["alert_accuracy.csv", "turbine_id, horizon, model,\nprecision, recall, f1,\nfalse_alarm_rate, balanced_accuracy", f"{_get_row_count('alert_accuracy.csv'):,}", "Ramp detection\naccuracy metrics"],
@@ -1737,7 +1738,11 @@ class ReportBuilder:
 
         rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
         leak_rows = len(self.leakage_df)
-        leak_flagged = int(self.leakage_df.get("contains_future_marker", pd.Series(dtype=bool)).sum()) if leak_rows else 0
+        leak_evidence = self.leakage_audit_exists and leak_rows > 0
+        if leak_evidence and "leakage_free" in self.leakage_df.columns:
+            leak_flagged = int((~self.leakage_df["leakage_free"]).sum())
+        else:
+            leak_flagged = None
         n_synth = self.reindex.get("n_synthetic_rows_reindexed", 0) if self.reindex else 0
         n_raw = rc.get("n_rows", 0)
 
@@ -1748,7 +1753,7 @@ class ReportBuilder:
              "is_feature_column(); per-horizon target shift P(t+h) verified; feature lists persisted and "
              "audited; assert-style fail-closed checks (target not in X, y_pred != y_true, "
              "timestamp_target = timestamp_issue + horizon).",
-             f"leakage_audit.csv ({leak_rows} models, {leak_flagged} flagged), "
+             f"{f'leakage_audit.csv ({leak_rows} models, {leak_flagged} flagged)' if leak_evidence else 'leakage_audit.csv MISSING (evidence not generated)'}, "
              "sample_trace_TB02_24hour.csv, outputs/forecasts/evaluation_metrics.csv (Ridge RMSE now realistic)"],
             ["P0-02", "Data period and sample counts inconsistent (01/2021-07/2026 vs 12/2026); 46,800 test rows "
              "did not match 21-month date range",
@@ -1803,12 +1808,26 @@ class ReportBuilder:
         self.story.append(_make_table(rows, col_widths=[14 * mm, 36 * mm, 62 * mm, 38 * mm]))
 
         self.story.append(Paragraph("Acceptance criteria (Section 7 of the review) and status:", s["SectionH3"]))
+        if not self.eval_df.empty and "model" in self.eval_df.columns:
+            n_ridge_rows = int((self.eval_df["model"].astype(str).str.lower() == "ridge").sum())
+            n_persist_rows = int((self.eval_df["model"].astype(str).str.lower() == "persistence").sum())
+        else:
+            n_ridge_rows = n_persist_rows = 0
+        skill_populated = bool(self.eval_df["skill_score"].notna().sum() > 0) if "skill_score" in self.eval_df.columns else False
+        a01_status = ("FAIL - evidence missing" if not leak_evidence else
+                      f"PASS - 0 flagged ({leak_rows} models audited)" if leak_flagged == 0 else
+                      f"FAIL - {leak_flagged} models flagged")
+        a03_status = ("Not verifiable - no ridge rows in evaluation_metrics.csv" if n_ridge_rows == 0 else
+                      "PASS - Ridge RMSE in line with other models (no R2 ~ 1.0)")
+        a04_status = ("Not verifiable - no persistence rows in evaluation_metrics.csv" if n_persist_rows == 0 else
+                      "Not verifiable - skill_score empty in evaluation_metrics.csv" if not skill_populated else
+                      "PASS - skill_score / skill_vs_ridge populated per row")
         a_rows = [["Code", "Criterion", "Evidence file", "Status"]]
         a_rows += [
-            ["A01", "No target/future feature in X", "leakage_audit.csv + sample_trace_TB02_24hour.csv", f"{'PASS - 0 flagged' if leak_flagged == 0 else 'FAIL'} ({leak_rows} models audited)"],
+            ["A01", "No target/future feature in X", "leakage_audit.csv + sample_trace_TB02_24hour.csv", a01_status],
             ["A02", "Timestamp & sample counts consistent", "raw_coverage_audit.json + split_statistics.json", f"Reported on observed data ({n_raw:,} raw unique ts)"],
-            ["A03", "Ridge baseline realistic", "evaluation_metrics.csv", "Ridge RMSE now in line with other models (no R2 ~ 1.0)"],
-            ["A04", "Persistence & Forecast Skill complete", "evaluation_metrics.csv", "skill_score / skill_vs_ridge populated per row"],
+            ["A03", "Ridge baseline realistic", "evaluation_metrics.csv", a03_status],
+            ["A04", "Persistence & Forecast Skill complete", "evaluation_metrics.csv", a04_status],
             ["A05", "Train/val/test time ranges exact", "split_statistics.json", "Exact start/end per split, no '~'"],
             ["A06", "Model/artifact/API/test counts unified", "inventory_summary.json", "Dynamic counts throughout this report"],
             ["A07", "TB12 missing rate explained", "data_quality_report.csv + tb12_analysis.json", "Scoped by column and split"],
@@ -1817,6 +1836,7 @@ class ReportBuilder:
             ["A10", "Ramp/anomaly/failure evidence", "alert_accuracy.csv + anomaly_accuracy.csv", "Semantics labeled as heuristic risk scores"],
             ["A11", "API security & benchmark", "tests/test_api.py + logs/api_audit.log", "Env-var key, restricted CORS, /health/ alias"],
             ["A12", "Report auto-generated, no hardcoded numbers", "this PDF + generate_report.py", "All tables read from last pipeline run"],
+            ["A13", "Reproducible from a clean environment", "README + README_REPRODUCE.md + run_all.bat", "run_all.bat: deps -> main.py -> pytest -> generate_report.py -> API"],
         ]
         self.story.append(_make_table(a_rows, col_widths=[14 * mm, 46 * mm, 55 * mm, 35 * mm]))
         self.story.append(PageBreak())

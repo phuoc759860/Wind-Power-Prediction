@@ -345,6 +345,20 @@ def sample_trace(feature_data: pd.DataFrame,
     data["timestamp_target"] = pd.to_datetime(data["timestamp"]) + pd.Timedelta(minutes=steps * 10)
     data["target"] = data[target]
 
+    # Only trace rows where every feature actually present is finite: NaN
+    # columns passed to scaler.transform/predict raise "Input X contains NaN".
+    pred_cols = set(base_cols)
+    for info in ml_models.values():
+        pred_cols.update(info.get("feature_cols", []))
+    for _, (_, _, fcols) in ridge_models.items():
+        pred_cols.update(fcols)
+    used_cols = [c for c in pred_cols if c in data.columns]
+    total = len(data)
+    finite = data[used_cols].notna().all(axis=1) & data["target"].notna()
+    data = data.loc[finite].copy()
+    logger.info(f"sample_trace {turbine} {horizon}: kept {len(data)}/{total} rows "
+                f"({int((~finite).sum())} dropped: NaN in features or target)")
+
     if f"{target}_lightgbm" in ml_models:
         info = ml_models[f"{target}_lightgbm"]
         X = data.reindex(columns=info["feature_cols"], fill_value=0)

@@ -1,0 +1,17 @@
+{
+  "model_key": "farm_total_power_target_6hour_lightgbm",
+  "model_type": "lightgbm",
+  "n_features": 150,
+  "seed": 42,
+  "python_version": "3.13.14",
+  "git_commit": "c386c0659496e3b59c574bfa3b840e69cb79bde0",
+  "config_hash": "cb5d2162a1fb6155",
+  "source_data_hash": "4960073793509e08",
+  "dependencies": {
+    "pandas": "pandas",
+    "numpy": "numpy",
+    "scikit-learn": "sklearn",
+    "xgboost": "xgboost",
+    "lightgbm": "lightgbm"
+  }
+}

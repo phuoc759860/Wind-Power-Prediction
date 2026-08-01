@@ -375,7 +375,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     test_with_failure, availability_results = run_failure_analysis(test_df, config)
 
     for turbine, avail in availability_results.items():
-        logger.info(f"  {turbine}: Availability={avail['availability_pct']}%")
+        logger.info(f"  {turbine}: Observed availability={avail.get('observed_availability_pct')}% "
+                    f"(calendar {avail.get('calendar_availability_pct')}%, coverage {avail.get('data_coverage_pct')}%)")
 
     with open(base_dir / "data" / "metadata" / "availability_report.json", "w") as f:
         json.dump(availability_results, f, indent=2, default=str)
@@ -575,7 +576,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         generate_power_forecast, generate_farm_forecast, generate_metrics,
         generate_data_quality_report, generate_ramp_alert, generate_anomaly_alert,
         generate_failure_risk, generate_temperature_warning,
-        generate_screening_summary,
+        generate_screening_summary, generate_alert_accuracy,
+        generate_anomaly_accuracy,
     )
     generate_power_forecast(test_df, all_trained_models)
     generate_farm_forecast(test_df, all_trained_models)
@@ -586,6 +588,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     generate_failure_risk(test_df)
     generate_temperature_warning(test_df)
     generate_screening_summary()
+    generate_alert_accuracy(test_df, all_trained_models)
+    generate_anomaly_accuracy(test_df)
 
     # ============================================================
     # STEP 15: Provenance — reindex additions + auto inventory (P0-02, P1-01)

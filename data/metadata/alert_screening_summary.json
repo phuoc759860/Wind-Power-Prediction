@@ -1,0 +1,25 @@
+{
+  "scope": "All ramp/anomaly/temperature/failure outputs on the TEST window",
+  "status": "SCREENING_ONLY",
+  "statement": "These files list timestamps flagged by simple heuristics (thresholds on power deltas, z-scores, temperature limits, repeated stops). They are NOT confirmed fault/event forecasts; each flag requires operator verification against O&M logs before being treated as an event.",
+  "confirmed_by_operator": false,
+  "reviewer_note": "P1-05: renamed from 'fault forecast' to heuristic screening",
+  "file_counts": {
+    "ramp_alert": {
+      "n_rows": 381,
+      "heuristic": true
+    },
+    "anomaly_alert": {
+      "n_rows": 769,
+      "heuristic": true
+    },
+    "temperature_warning": {
+      "n_rows": 0,
+      "heuristic": true
+    },
+    "failure_risk": {
+      "n_rows": 37271,
+      "heuristic": true
+    }
+  }
+}

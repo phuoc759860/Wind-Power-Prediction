@@ -1,0 +1,13 @@
+{
+  "n_processed_rows": 312048,
+  "n_raw_union_rows": 292447,
+  "n_synthetic_rows_reindexed": 19601,
+  "synthetic_ratio_pct": 6.2814,
+  "example_synthetic_timestamps": [
+    "2026-01-08 07:00:00",
+    "2026-01-08 07:10:00",
+    "2026-01-08 07:20:00",
+    "2026-01-08 07:30:00",
+    "2026-01-08 07:40:00"
+  ]
+}

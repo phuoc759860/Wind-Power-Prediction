@@ -418,33 +418,37 @@ def generate_anomaly_alert(test_df):
         p_valid = power[valid]
         mean_p, std_p = np.mean(p_valid), np.std(p_valid)
 
+        # Physical-rule violations are always screened regardless of z-score.
+        # The statistical rule uses z > 2.5: with power bounded to [0, rated]
+        # a global z > 3.0 is mathematically unreachable on this distribution,
+        # which silently suppressed every alert (reviewer P1-05).
         for i in range(len(power)):
             if np.isnan(power[i]) or np.isnan(ws[i]):
                 continue
             z_score = abs(power[i] - mean_p) / (std_p + 1e-6)
-            if z_score > 3.0:
-                anomaly_score = round(float(z_score), 4)
-                if power[i] < 0:
-                    evidence = "Negative power output (possible motoring)"
-                elif power[i] > RATED_POWER:
-                    evidence = "Power exceeds rated capacity"
-                elif ws[i] < 3 and power[i] > 500:
-                    evidence = "High power at low wind speed"
-                elif ws[i] > 15 and power[i] < 200:
-                    evidence = "Low power at high wind speed"
-                else:
-                    evidence = f"Statistical anomaly (z={anomaly_score:.2f})"
+            if power[i] < 0:
+                evidence = "Negative power output (possible motoring)"
+            elif power[i] > RATED_POWER:
+                evidence = "Power exceeds rated capacity"
+            elif ws[i] < 3 and power[i] > 500:
+                evidence = "High power at low wind speed"
+            elif ws[i] > 15 and power[i] < 200:
+                evidence = "Low power at high wind speed"
+            elif z_score > 2.5:
+                evidence = f"Statistical anomaly (z={z_score:.2f})"
+            else:
+                continue
 
-                rows.append({
-                    "timestamp": str(timestamps[i]),
-                    "turbine_id": tb,
-                    "anomaly_score": anomaly_score,
-                    "suspected_component": "power_output",
-                    "evidence": evidence,
-                    "method": "heuristic_screening",
-                    "confirmed": False,
-                    "verification_status": "SCREENING_ONLY",
-                })
+            rows.append({
+                "timestamp": str(timestamps[i]),
+                "turbine_id": tb,
+                "anomaly_score": round(float(z_score), 4),
+                "suspected_component": "power_output",
+                "evidence": evidence,
+                "method": "heuristic_screening",
+                "confirmed": False,
+                "verification_status": "SCREENING_ONLY",
+            })
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "anomaly_alert.csv", index=False)
