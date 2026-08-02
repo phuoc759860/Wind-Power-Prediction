@@ -348,7 +348,21 @@ fail-closed security rows).
   (29 503 rows, a full calendar year). The report therefore states the actual
   observed coverage (-> 07/12/2026) and explains the misnaming; the raw files
   are frozen and never edited.
-- Test window: 2026-01-16 -> 2026-12-07 (46 808 rows).
+- **Data-entry flag for the SCADA export owner:** the file name
+  `01.2026-07.2026.xlsx` does not match its content (extends ~5 months beyond
+  the label, into December 2026). This is a supplier-side mislabel, not a
+  pipeline bug. The pipeline already defends against it (evaluation_cutoff
+  truncation, `is_simulated` flag, README + Section 3.1 disclosure), but every
+  submission cycle the reviewer sees a raw extent that overshoots the report
+  date. Please rename/re-split the export at the source (e.g. produce
+  `01.2026-07.2026.xlsx` containing only through `2026-07-31`) so the raw
+  union ends at the intended boundary.
+- Official test window (from `data/metadata/evaluation_window.json`
+  `test_window_official_end`, cutoff-truncated at `evaluation_cutoff =
+  min(report_date, raw_union_end)`): 2026-01-16 -> 2026-07-31 (28 232 rows).
+  The raw test split extends to 2026-12-07 (46 808 rows) but the 18 576 rows
+  at/after the report date are flagged `is_simulated=1` and excluded from all
+  official metrics.
 - TB12 has ~44% missing power (per-split detail in `tb12_analysis.json`).
 - 6h/24h models use historical SCADA only (no NWP); day-ahead requires NWP.
 - Ramp/anomaly/temperature/failure outputs are heuristic screening flags; they

@@ -930,6 +930,10 @@ class ReportBuilder:
             "<b>is_simulated=1</b> in the processed data and are <b>excluded from the official evaluation</b> "
             f"({ew_excl:,} rows set aside); every metric in this report is computed only on the official "
             f"window (test window ends {ew.get('test_window_official_end', 'N/A')[:10]}). "
+            "This is a supplier-side file mislabel: the last source file is named "
+            "<font color='#2F5496'>01.2026-07.2026.xlsx</font> but its rows extend to "
+            f"{ew.get('raw_union_end', ts_end)[:10]}; the raw files are ingested as-is and the cutoff "
+            "truncation is the pipeline's defense (flagged to the export owner, see README). "
             "(2) to obtain a regular 10-minute grid the pipeline re-indexes the timestamp axis, which "
             f"introduces <b>{n_synth:,} synthetic rows</b> out of {n_proc:,} processed timestamps "
             f"(synthetic ratio {self.reindex.get('synthetic_ratio_pct', 0):.2f}%) \u2014 these rows are "
@@ -987,21 +991,22 @@ class ReportBuilder:
         ))
         avail_metrics = [
             ["Metric", "Formula", "Meaning"],
-            ["Observed availability",
+            ["Observed operational availability",
              "Generating / (Generating + Stopped + Curtailed + Standby + Comm. loss) x 100",
-             "Fraction of time with valid telemetry during which the turbine generated (operational availability)."],
-            ["Calendar availability",
+             "Availability over the observed time only (missing telemetry excluded from the denominator)."],
+            ["Coverage-adjusted availability",
              "Generating / Total elapsed hours x 100",
-             "Fraction of the full calendar test period actually generating; penalises missing telemetry."],
+             "Conservative metric that treats missing time as unavailable (missing included in the denominator)."],
             ["Data coverage",
              "Observed hours / Total elapsed hours x 100",
              "Share of the calendar period with telemetry present (observed = generating + stopped + curtailed + standby + comm. loss)."],
         ]
-        self.story.append(_make_table(avail_metrics, col_widths=[40 * mm, 62 * mm, 66 * mm]))
+        self.story.append(_make_table(avail_metrics, col_widths=[48 * mm, 62 * mm, 58 * mm]))
         self.story.append(Paragraph(
-            "Observed availability is the headline figure used throughout this report; calendar availability "
-            "and data coverage are reported alongside it so that a low headline value can be attributed to "
-            "either low generation or missing telemetry (e.g. TB12, Section 5.5).",
+            "Observed operational availability is the headline figure used throughout this report; "
+            "coverage-adjusted availability and data coverage are reported alongside it so that a low "
+            "headline value can be attributed to either low generation or missing telemetry (e.g. TB12, "
+            "Section 5.5).",
             s["BodyText2"],
         ))
         if self.availability:
@@ -1025,7 +1030,7 @@ class ReportBuilder:
 
         if self.availability:
             avail_data = [["Turbine", "Generating (hrs)", "Stopped (hrs)", "Missing (hrs)",
-                           "Observed Avail. (%)", "Calendar Avail. (%)", "Data Cov. (%)"]]
+                           "Observed Operational Avail. (%)", "Coverage-Adjusted Avail. (%)", "Data Cov. (%)"]]
             for tb_id in [f"TB{i:02d}" for i in range(1, 13)]:
                 key = f"{tb_id}_power"
                 if key in self.availability:
@@ -1224,10 +1229,11 @@ class ReportBuilder:
 
         if not self.leakage_df.empty:
             self.story.append(Paragraph("Leakage Audit (every trained model):", s["SectionH3"]))
-            n_flagged = int(self.leakage_df.get("leakage_free", pd.Series(dtype=bool)).eq(False).sum())
-            n_feats = int(self.leakage_df.get("n_features", pd.Series(dtype=float)).sum())
             full = self.leakage_full_df
-            if not full.empty and "model" in full.columns:
+            if not full.empty and "all_passed" in full.columns:
+                n_flagged = int(full["all_passed"].eq(False).sum())
+                n_audited = int(len(full))
+                n_feats = int(full.get("n_features", pd.Series(dtype=float)).sum())
                 fam_rows = []
                 for fam in ["ridge", "xgboost", "lightgbm"]:
                     sub = full[full["model"] == fam]
@@ -1237,11 +1243,19 @@ class ReportBuilder:
                     fam_rows.append(f"{fam}: {len(sub)} models, {flagged} flagged")
                 fam_txt = "; ".join(fam_rows) + "."
                 n_ml = int((full["model"] != "ridge").sum())
-                span_txt = (f"The audit covers <b>{len(full)} model fits</b> across "
+                span_txt = (f"The audit covers <b>{n_audited} model fits</b> across "
                             f"ridge, XGBoost and LightGBM ({n_ml} ML fits), each checked per "
                             f"turbine and per horizon (10 min/30 min/1 h/6 h/24 h). Breakdown: {fam_txt}")
+                result_txt = (f"Result (full audit, every turbine x horizon x model family): "
+                              f"<b>{n_flagged} flagged models out of {n_audited}</b> audited "
+                              f"({n_feats:,} features used in total).")
             else:
+                n_flagged = int(self.leakage_df.get("leakage_free", pd.Series(dtype=bool)).eq(False).sum())
+                n_feats = int(self.leakage_df.get("n_features", pd.Series(dtype=float)).sum())
                 span_txt = ""
+                result_txt = (f"Result (column-marker audit): "
+                              f"<b>{n_flagged} flagged models out of {len(self.leakage_df)}</b> audited "
+                              f"({n_feats:,} features used in total).")
             self.story.append(Paragraph(
                 f"The pipeline runs an automated leakage audit over every trained model. Each model's "
                 f"persisted feature list is checked for any target/future marker "
@@ -1249,10 +1263,9 @@ class ReportBuilder:
                 f"'_is_stopped', '_failure_event'); the audit also verifies that the target column "
                 f"P(t+h) is not among the features, that no future-leaning feature is present, that "
                 f"timestamps satisfy timestamp_target = timestamp_issue + horizon, and that no two "
-                f"models return identical predictions. {span_txt} Result (Ridge audit, all horizons): "
-                f"<b>{n_flagged} flagged models out of {len(self.leakage_df)}</b> audited "
-                f"({n_feats:,} features used in total). A non-zero count aborts the pipeline (fail-closed); "
-                f"the full per-family audit is persisted to "
+                f"models return predictions identical to their target. {span_txt} {result_txt} "
+                f"A non-zero count aborts the pipeline (fail-closed); "
+                f"the per-family audit (leakage_audit_full.csv) is persisted to "
                 "<font color='#2F5496'>data/metadata/leakage_audit_full.csv</font>.",
                 s["BodyText2"],
             ))
@@ -1983,12 +1996,12 @@ class ReportBuilder:
             ["metrics.csv", "model, turbine_id, horizon,\nMAE, nMAE, RMSE, nRMSE,\nBias, R2, skill_score,\nmax_error", f"{_get_row_count('metrics.csv'):,}", "Condensed model\nperformance metrics"],
             ["farm_metrics.csv", "target, model, horizon,\nmae, rmse, nmae_pct, nrmse_pct,\nbias, r2, max_error, n_samples,\nn_at_capacity, n_zero_power,\n*_corrected (bias-adjusted,\nP1-04), correction_*", f"{_get_row_count('farm_metrics.csv'):,}", "Farm-level metrics,\nraw vs bias-corrected"],
             ["data_quality_report.csv", "column, missing_rate_pct,\ninvalid_values, min, max,\nunit, remarks, definition,\ndata_source", f"{_get_row_count('data_quality_report.csv'):,}", "Column-level\ndata quality"],
-            ["ramp_alert.csv", "timestamp, ramp_type,\nexpected_change, probability,\nthreshold, affected_turbines", f"{_get_row_count('ramp_alert.csv'):,}", "Ramp events\ndetected"],
+            ["ramp_alert.csv", "timestamp, ramp_type,\nexpected_change, probability,\nthreshold, affected_turbines", f"{_get_row_count('ramp_alert.csv'):,}", "Ramp screening\nadvisories"],
             ["failure_risk.csv", "timestamp, turbine_id, component,\nhorizon, stop_risk_score,\nmethod, recommended_action", f"{_get_row_count('failure_risk.csv'):,}", "Turbine failure\nrisk assessment"],
             ["anomaly_alert.csv", "timestamp, turbine_id,\nanomaly_score, suspected_component,\nevidence", f"{_get_row_count('anomaly_alert.csv'):,}", "Heuristic anomaly\nscreening (rules + z > 2.5)"],
             ["temperature_warning.csv", "timestamp, turbine_id,\ntemperature, warning_type,\nseverity, message", f"{_get_row_count('temperature_warning.csv'):,}", "Temperature threshold\nalerts"],
             ["coverage_calibration.csv", "turbine_id, horizon, model,\nnominal_coverage,\nactual_coverage,\ncalibration_error", f"{_get_row_count('coverage_calibration.csv'):,}", "Empirical interval\ncoverage calibration\n(5.10)"],
-            ["alert_accuracy.csv", "turbine_id, horizon, model,\nprecision, recall, f1,\nfalse_alarm_rate, balanced_accuracy", f"{_get_row_count('alert_accuracy.csv'):,}", "Ramp detection\naccuracy metrics"],
+            ["alert_accuracy.csv", "turbine_id, horizon, model,\nprecision, recall, f1,\nfalse_alarm_rate, balanced_accuracy", f"{_get_row_count('alert_accuracy.csv'):,}", "Ramp screening\naccuracy metrics"],
             ["anomaly_accuracy.csv", "turbine_id, method,\nprecision, recall, f1,\nfalse_alarm_rate", f"{_get_row_count('anomaly_accuracy.csv'):,}", "Anomaly detection\naccuracy metrics"],
             ["farm_horizon_window_check.csv", "horizon_a, horizon_b,\nn_common_samples,\nwindow_identical, window_start,\nwindow_end, r2_a_on_common,\nr2_b_on_common,\nr2_b_minus_a_on_common,\nn_at_capacity_*_common,\nn_zero_power_*_common", f"{_get_row_count('farm_horizon_window_check.csv'):,}", "Same-window horizon\nR2 comparison (P1-04)"],
         ]
@@ -2400,11 +2413,15 @@ class ReportBuilder:
         ))
 
         rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
-        leak_rows = len(self.leakage_df)
-        leak_evidence = self.leakage_audit_exists and leak_rows > 0
-        if leak_evidence and "leakage_free" in self.leakage_df.columns:
+        leak_full2 = self.leakage_full_df
+        if not leak_full2.empty and "all_passed" in leak_full2.columns:
+            leak_evidence = self.leakage_full_exists
+            leak_flagged = int(leak_full2["all_passed"].eq(False).sum())
+        elif self.leakage_audit_exists and not self.leakage_df.empty:
+            leak_evidence = True
             leak_flagged = int((~self.leakage_df["leakage_free"]).sum())
         else:
+            leak_evidence = False
             leak_flagged = None
         n_synth = self.reindex.get("n_synthetic_rows_reindexed", 0) if self.reindex else 0
         n_raw = rc.get("n_rows", 0)
@@ -2426,7 +2443,7 @@ class ReportBuilder:
              "is_feature_column(); per-horizon target shift P(t+h) verified; feature lists persisted and "
              "audited; assert-style fail-closed checks (target not in X, y_pred != y_true, "
              "timestamp_target = timestamp_issue + horizon).",
-             f"{f'leakage_audit.csv ({leak_rows} models, {leak_flagged} flagged)' if leak_evidence else 'leakage_audit.csv MISSING (evidence not generated)'}, "
+             f"{f'leakage_audit_full.csv ({len(leak_full2) if not leak_full2.empty else 0} models, {leak_flagged} flagged)' if leak_evidence else 'leakage_audit_full.csv MISSING (evidence not generated)'}, "
              "sample_trace_TB02_24hour.csv, outputs/forecasts/evaluation_metrics.csv (Ridge RMSE now realistic)"],
             ["P0-02", "Data period and sample counts inconsistent (01/2021-07/2026 vs 12/2026); 46,800 test rows "
              "did not match 21-month date range",
@@ -2507,8 +2524,9 @@ class ReportBuilder:
              "plus best parameters when enabled (training.tuning.enabled, default false).",
              "data/metadata/tuning_results.csv, best_params.json, Section 4.4"],
             ["P1-03 Availability formulas in report",
-             "Section 3.3 now defines observed availability, calendar availability and data coverage "
-             "with explicit formulas and a per-turbine table carrying all three metrics.",
+             "Section 3.3 now separates data coverage, observed operational availability and "
+             "coverage-adjusted availability with explicit formulas and a per-turbine table "
+             "carrying all three metrics.",
              "availability_report.json, Section 3.3"],
             ["P1-04 Interval calibration honesty + TB12 breakdown",
              "The report no longer calls y_low/y_high a '95% CI'; empirical coverage is measured per "
@@ -2539,7 +2557,7 @@ class ReportBuilder:
             n_ridge_rows = n_persist_rows = 0
         skill_populated = bool(self.eval_df["skill_score"].notna().sum() > 0) if "skill_score" in self.eval_df.columns else False
         a01_status = ("FAIL - evidence missing" if not leak_evidence else
-                      f"PASS - 0 flagged ({leak_rows} models audited)" if leak_flagged == 0 else
+                      f"PASS - 0 flagged ({len(leak_full2) if not leak_full2.empty else 0} models audited)" if leak_flagged == 0 else
                       f"FAIL - {leak_flagged} models flagged")
         a03_status = ("Not verifiable - no ridge rows in evaluation_metrics.csv" if n_ridge_rows == 0 else
                       "PASS - Ridge RMSE in line with other models (no R2 ~ 1.0)")
@@ -2555,7 +2573,7 @@ class ReportBuilder:
             ["A05", "Train/val/test time ranges exact", "split_statistics.json", "Exact start/end per split, no '~'"],
             ["A06", "Model/artifact/API/test counts unified", "inventory_summary.json", "Dynamic counts throughout this report"],
             ["A07", "TB12 missing rate explained", "data_quality_report.csv + tb12_analysis.json", "Scoped by column and split"],
-            ["A08", "Availability two formulas", "availability_report.json", "coverage vs observed availability"],
+            ["A08", "Availability three metrics", "availability_report.json", "observed / coverage-adjusted / data coverage"],
             ["A09", "Farm bias & calibration", "farm_bias.csv + 25_farm_bias_calibration.png", "Segmented bias + calibration plot"],
             ["A10", "Ramp/anomaly/failure evidence", "alert_accuracy.csv + anomaly_accuracy.csv", "Semantics labeled as heuristic risk scores"],
             ["A11", "API security & benchmark", "tests/test_api.py + logs/api_audit.log", "Env-var key, restricted CORS, /health/ alias"],

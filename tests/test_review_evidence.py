@@ -553,3 +553,44 @@ def test_provenance_columns_carried_through_feature_engineering():
     for col in ["is_observed", "is_synthetic", "is_imputed"]:
         assert col in out.columns
     assert len(out) == n
+
+
+def test_no_date_after_report_date_in_headline_metrics():
+    """P0-01/P0-03: no date after data.report_date appears anywhere in the
+    headline metrics/forecast outputs. The official evaluation window is cut at
+    evaluation_cutoff = min(report_date, raw_union_end); any timestamp at/after
+    the report date in a shipped headline file would leak simulated rows into
+    official claims."""
+    import yaml
+    import json
+
+    base = Path(__file__).parent.parent
+    config = yaml.safe_load(open(base / "configs" / "config.yaml", encoding="utf-8"))
+    report_date = pd.Timestamp(config["data"]["report_date"])
+
+    ew = json.load(open(base / "data" / "metadata" / "evaluation_window.json"))
+    official_end = pd.Timestamp(ew["test_window_official_end"])
+    assert official_end <= report_date, (
+        f"test_window_official_end {official_end.date()} must be <= report_date {report_date.date()}")
+
+    headline_files = [
+        "power_forecast.csv", "farm_forecast.csv",
+        "evaluation_metrics.csv", "farm_metrics.csv", "metrics.csv",
+        "coverage_calibration.csv", "nwp_ablation.csv",
+    ]
+    for name in headline_files:
+        path = base / "outputs" / "forecasts" / name
+        assert path.exists(), f"headline file missing: {name}"
+        df = pd.read_csv(path)
+        for col in df.columns:
+            if not df[col].dtype == object:
+                continue
+            sample = df[col].dropna().head(2000)
+            parsed = pd.to_datetime(sample, errors="coerce")
+            if parsed.notna().sum() < max(1, len(sample) * 0.9):
+                continue  # not a date-like column
+            late = parsed[parsed > report_date]
+            assert late.empty, (
+                f"{name}:{col} contains {len(late)} timestamps after report_date "
+                f"{report_date.date()} (e.g. {late.iloc[0]}) - official metrics "
+                "must not include simulated rows")
