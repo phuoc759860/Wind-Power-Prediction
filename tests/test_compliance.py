@@ -356,9 +356,15 @@ def test_report_walk_forward_uses_actual_folds_and_std():
     assert actual, "walk_forward_summary.json has no n_folds"
     n = max(actual)
 
-    # stale hand-copied claims must not be rendered
-    for stale in ["with 5 folds", "5-fold", "confirms baseline stability", "assesses model stability"]:
+    # stale hand-copied claims must not be rendered: no fold count that does NOT
+    # match the actual n, and no stability claim without the actual std.
+    for stale in ["confirms baseline stability", "assesses model stability"]:
         assert stale not in blob, f"stale walk-forward claim {stale!r} still rendered"
+    for k in range(1, 9):
+        if k == n:
+            continue
+        for pat in (f"with {k} folds", f"{k}-fold"):
+            assert pat not in blob, f"stale walk-forward claim {pat!r} still rendered"
 
     # actual fold count reported
     assert f"({n}-fold, mean +/- std)" in blob

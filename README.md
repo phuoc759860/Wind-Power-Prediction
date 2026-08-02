@@ -99,7 +99,7 @@ python main.py
 
 This executes all 13 steps: load data → column mapping → validation → preprocessing → feature engineering → time split → train baselines (persistence + ridge) → train ML models (XGBoost + LightGBM) → anomaly detection → failure analysis → generate predictions → create forecast output → summary visualizations.
 
-Also performs walk-forward validation (5 folds) for baseline models.
+Also performs walk-forward validation (5 chronological folds) for baseline models.
 
 ### 5. Start the Web Dashboard
 

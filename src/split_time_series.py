@@ -132,20 +132,27 @@ def walk_forward_split(df: pd.DataFrame, n_folds: int = 5,
     df = df.copy().sort_values(timestamp_col).reset_index(drop=True)
     total = len(df)
     folds = []
-    test_size = val_size
-    train_start_ratio = 0.3
-    step_ratio = 0.15
+    # Ratios chosen so every requested fold fits inside the data: train always
+    # starts at the beginning, and the val/test windows (each of width
+    # step_ratio) slide forward one step per fold. The last fold needs
+    # train_start + (n_folds + 1) * step + step <= 1.0; here 0.25 + 6 * 0.12 =
+    # 0.97 <= 1.0, so all 5 requested folds are produced. The previous ratios
+    # (0.30 / 0.15) pushed the 5th fold's val_end past 100% of the data, so
+    # fold 5 was silently dropped on every dataset (walk_forward_summary.json
+    # always showed n_folds: 4).
+    train_start_ratio = 0.25
+    step_ratio = 0.12
 
     for i in range(n_folds):
         train_end = int(total * (train_start_ratio + i * step_ratio))
-        val_end = int(total * (train_start_ratio + step_ratio + i * step_ratio))
-        test_end = min(int(total * (train_start_ratio + 2 * step_ratio + i * step_ratio)), total)
+        val_end = int(total * (train_start_ratio + (i + 1) * step_ratio))
+        test_end = min(int(total * (train_start_ratio + (i + 2) * step_ratio)), total)
 
         train_end = max(train_end, 100)
         val_end = max(val_end, train_end + 1)
         test_end = max(test_end, val_end + 1)
 
-        if test_end > total:
+        if test_end > total or val_end >= test_end:
             break
 
         train = df.iloc[:train_end].copy()
