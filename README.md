@@ -188,6 +188,8 @@ Generated in `outputs/forecasts/`:
 | `temperature_warning.csv` | timestamp, turbine_id, temperature, warning_type, severity, message | 0+ | Temperature threshold alerts |
 | `coverage_calibration.csv` | target, model, horizon, nominal_confidence, empirical_coverage, mean_interval_width, calibration_error, n_samples | 220 | Conformal CI coverage calibration |
 
+> **Note:** on the generator fast path (`generate_outputs.py`), `skill_score`/`skill_vs_persistence` in `evaluation_metrics.csv`/`metrics.csv` are computed against a persistence baseline and are fully populated; `skill_vs_ridge` is `NaN` by design there, because ridge models are trained only in the full `main.py` pipeline.
+
 ## Testing
 
 ```bash

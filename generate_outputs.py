@@ -606,31 +606,14 @@ def generate_figures():
         test_df = get_test_data()
         models = load_models()
 
-        from src.evaluate import (evaluate_all_models, compute_farm_level_metrics,
+        from src.evaluate import (compute_farm_level_metrics,
                                   fit_farm_bias_correction, apply_farm_bias_correction,
                                   farm_horizon_window_check)
-        from src.predict import predict_power, predict_with_model
+        from src.predict import predict_power
         config = load_config()
 
-        predictions = {}
-        for tb in TURBINES:
-            for horizon in HORIZON_NAMES:
-                for mdl_name in ["lightgbm", "xgboost"]:
-                    target = f"{tb}_power_target_{horizon}"
-                    model_key = f"{target}_{mdl_name}"
-                    if model_key in models:
-                        preds = predict_with_model(models[model_key], test_df)
-                        predictions[model_key] = {"predictions": preds, "model_name": mdl_name, "target": target}
-
-                    farm_target = f"farm_total_power_target_{horizon}"
-                    farm_key = f"{farm_target}_{mdl_name}"
-                    if farm_key in models:
-                        preds = predict_with_model(models[farm_key], test_df)
-                        predictions[farm_key] = {"predictions": preds, "model_name": mdl_name, "target": farm_target}
-
-        results_df = evaluate_all_models(test_df, predictions, config)
+        predictions, results_df = generate_evaluation_metrics(test_df, models)
         if not results_df.empty:
-            results_df.to_csv(OUT / "evaluation_metrics.csv", index=False)
             val_df = get_val_data()
             val_predictions = predict_power(val_df, models, config)
             farm_bias_params = fit_farm_bias_correction(val_df, val_predictions, config)
@@ -867,6 +850,56 @@ def generate_anomaly_accuracy(test_df):
     logger.info(f"  anomaly_accuracy.csv: {df.shape[0]} rows")
 
 
+def _build_predictions_and_persistence(test_df, models):
+    """Predictions dict for every turbine/farm x horizon x model, plus
+    persistence-baseline predictions for the SAME targets (no training
+    required). Feeding baseline_predictions into evaluate_all_models is what
+    makes skill_score non-NaN — this is what the P0 fix in main.py does, and
+    what the fast-path generator was missing.
+    """
+    from src.predict import predict_with_model
+    from src.train_baseline import persistence_predictions
+
+    predictions = {}
+    horizon_steps = {"10min": 1, "30min": 3, "1hour": 6, "6hour": 36, "24hour": 144}
+
+    targets = [f"{tb}_power_target_{h}" for tb in TURBINES for h in HORIZON_NAMES]
+    targets += [f"farm_total_power_target_{h}" for h in HORIZON_NAMES]
+
+    for target in targets:
+        for mdl_name in ["lightgbm", "xgboost"]:
+            model_key = f"{target}_{mdl_name}"
+            if model_key not in models:
+                continue
+            preds = predict_with_model(models[model_key], test_df)
+            predictions[model_key] = {"predictions": preds, "model_name": mdl_name, "target": target}
+
+    persistence_preds = {}
+    for target in targets:
+        if target not in test_df.columns:
+            continue
+        h_name = target.rsplit("_target_", 1)[1]
+        persistence_preds[target] = persistence_predictions(test_df, target, horizon_steps[h_name])
+
+    return predictions, persistence_preds
+
+
+def generate_evaluation_metrics(test_df, models):
+    """Write evaluation_metrics.csv with real skill_score (P0 fix, fast path)."""
+    from src.evaluate import evaluate_all_models, append_baseline_rows
+
+    config = load_config()
+    predictions, persistence_preds = _build_predictions_and_persistence(test_df, models)
+
+    results_df = evaluate_all_models(test_df, predictions, config,
+                                     baseline_predictions=persistence_preds)
+    results_df = append_baseline_rows(results_df, test_df, persistence_preds, {}, config)
+    results_df.to_csv(OUT / "evaluation_metrics.csv", index=False)
+    logger.info(f"  evaluation_metrics.csv: {results_df.shape[0]} rows "
+                f"(skill_score computed vs persistence baseline)")
+    return predictions, results_df
+
+
 def generate_all():
     test_df = get_test_data()
     logger.info(f"Test data: {test_df.shape}")
@@ -876,6 +909,7 @@ def generate_all():
 
     generate_power_forecast(test_df, models)
     generate_farm_forecast(test_df, models)
+    generate_evaluation_metrics(test_df, models)
     generate_metrics()
     generate_data_quality_report()
     generate_ramp_alert(test_df)
