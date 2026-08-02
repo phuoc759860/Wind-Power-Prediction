@@ -1,0 +1,91 @@
+phase,category,metric,value,unit,detail
+cold,startup,startup_to_ready_ms,1059.0,ms,spawn -> first 200 /health (includes registry scan)
+cold,startup,first_health_ms,1058.6,ms,/health response time on the very first call
+cold,startup,models_in_registry,142,count,"models scanned at startup (metadata only, lazy joblib.load)"
+cold,startup,prewarm_configured,0,,PREWARM_MODELS setting
+cold,ram,ram_baseline_mb,112.3,MB,server RSS right after readiness
+cold,cold_probe,cold_first_predict_ms,2220.2,ms,first /predict on a fresh server; all 5 turbine models lazy-loaded in the request path
+cold,cold_probe,max_model_load_ms,684.3,ms,slowest single joblib.load observed (per-model)
+cold,latency,n_requests,20,,GET /health
+cold,latency,min_ms,1.07,ms,GET /health
+cold,latency,p50_ms,13.11,ms,GET /health
+cold,latency,p95_ms,23.62,ms,GET /health
+cold,latency,p99_ms,23.62,ms,GET /health
+cold,latency,max_ms,23.62,ms,GET /health
+cold,latency,avg_ms,11.81,ms,GET /health
+cold,latency,status_ok_count,20,count,GET /health
+cold,latency,n_requests,20,,GET /models
+cold,latency,min_ms,12.73,ms,GET /models
+cold,latency,p50_ms,20.1,ms,GET /models
+cold,latency,p95_ms,22.59,ms,GET /models
+cold,latency,p99_ms,22.59,ms,GET /models
+cold,latency,max_ms,22.59,ms,GET /models
+cold,latency,avg_ms,18.89,ms,GET /models
+cold,latency,status_ok_count,20,count,GET /models
+cold,latency,n_requests,20,,POST /predict
+cold,latency,min_ms,12.27,ms,POST /predict
+cold,latency,p50_ms,25.92,ms,POST /predict
+cold,latency,p95_ms,41.14,ms,POST /predict
+cold,latency,p99_ms,41.14,ms,POST /predict
+cold,latency,max_ms,41.14,ms,POST /predict
+cold,latency,avg_ms,24.95,ms,POST /predict
+cold,latency,status_ok_count,20,count,POST /predict
+cold,latency,n_requests,20,,POST /predict/farm
+cold,latency,min_ms,12.18,ms,POST /predict/farm
+cold,latency,p50_ms,27.73,ms,POST /predict/farm
+cold,latency,p95_ms,44.02,ms,POST /predict/farm
+cold,latency,p99_ms,44.02,ms,POST /predict/farm
+cold,latency,max_ms,44.02,ms,POST /predict/farm
+cold,latency,avg_ms,27.33,ms,POST /predict/farm
+cold,latency,status_ok_count,20,count,POST /predict/farm
+cold,latency,worst_max_ms,44.0,ms,worst single request across endpoints in this phase
+cold,ram,ram_peak_mb,199.8,MB,server RSS after warm request burst
+cold,security,no_key_status,401,status,fail-closed: expected 401/403/503 (no default key / no file fallback)
+cold,security,wrong_key_status,403,status,fail-closed: expected 401/403/503 (invalid key rejected)
+prewarm,startup,startup_to_ready_ms,1031.1,ms,spawn -> first 200 /health (includes registry scan)
+prewarm,startup,first_health_ms,1030.9,ms,/health response time on the very first call
+prewarm,startup,models_in_registry,142,count,"models scanned at startup (metadata only, lazy joblib.load)"
+prewarm,startup,prewarm_configured,all,,PREWARM_MODELS setting
+prewarm,startup,prewarm_elapsed_ms,1031.6,ms,time until all pre-warm targets were in RAM
+prewarm,startup,prewarm_loaded_models,142,count,models_loaded_in_ram once pre-warm finished
+prewarm,ram,ram_baseline_mb,429.3,MB,server RSS right after readiness
+prewarm,cold_probe,first_predict_ms,1374.6,ms,first /predict on a pre-warmed server (model already in RAM)
+prewarm,latency,n_requests,20,,GET /health
+prewarm,latency,min_ms,1.78,ms,GET /health
+prewarm,latency,p50_ms,13.35,ms,GET /health
+prewarm,latency,p95_ms,17.15,ms,GET /health
+prewarm,latency,p99_ms,17.15,ms,GET /health
+prewarm,latency,max_ms,17.15,ms,GET /health
+prewarm,latency,avg_ms,10.48,ms,GET /health
+prewarm,latency,status_ok_count,20,count,GET /health
+prewarm,latency,n_requests,20,,GET /models
+prewarm,latency,min_ms,12.5,ms,GET /models
+prewarm,latency,p50_ms,15.83,ms,GET /models
+prewarm,latency,p95_ms,21.07,ms,GET /models
+prewarm,latency,p99_ms,21.07,ms,GET /models
+prewarm,latency,max_ms,21.07,ms,GET /models
+prewarm,latency,avg_ms,15.97,ms,GET /models
+prewarm,latency,status_ok_count,20,count,GET /models
+prewarm,latency,n_requests,20,,POST /predict
+prewarm,latency,min_ms,12.57,ms,POST /predict
+prewarm,latency,p50_ms,26.7,ms,POST /predict
+prewarm,latency,p95_ms,37.28,ms,POST /predict
+prewarm,latency,p99_ms,37.28,ms,POST /predict
+prewarm,latency,max_ms,37.28,ms,POST /predict
+prewarm,latency,avg_ms,24.2,ms,POST /predict
+prewarm,latency,status_ok_count,20,count,POST /predict
+prewarm,latency,n_requests,20,,POST /predict/farm
+prewarm,latency,min_ms,12.15,ms,POST /predict/farm
+prewarm,latency,p50_ms,24.7,ms,POST /predict/farm
+prewarm,latency,p95_ms,38.05,ms,POST /predict/farm
+prewarm,latency,p99_ms,38.05,ms,POST /predict/farm
+prewarm,latency,max_ms,38.05,ms,POST /predict/farm
+prewarm,latency,avg_ms,21.6,ms,POST /predict/farm
+prewarm,latency,status_ok_count,20,count,POST /predict/farm
+prewarm,latency,worst_max_ms,38.1,ms,worst single request across endpoints in this phase
+prewarm,ram,ram_peak_mb,413.6,MB,server RSS after warm request burst
+prewarm,security,no_key_status,401,status,fail-closed: expected 401/403/503 (no default key / no file fallback)
+prewarm,security,wrong_key_status,403,status,fail-closed: expected 401/403/503 (invalid key rejected)
+both,cold_probe,cold_tail_flag,1,bool,true if cold first /predict >5s or >3x warm p95 (cold lazy-load as source of the ~96s tail)
+both,cold_probe,cold_vs_warm_ratio,53.97,x,cold first /predict latency / warm p99 /predict latency
+both,latency,worst_max_ms_overall,44.0,ms,worst single request across ALL phases/endpoints (vs reviewer's ~96s claim)

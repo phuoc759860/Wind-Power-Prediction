@@ -1,0 +1,13 @@
+turbine_id,method,n_gt_anomalies,n_detected,precision,recall,f1,false_alarm_rate,power_anomaly_precision,wind_curve_anomaly_precision
+TB01,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB02,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB03,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB04,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB05,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB06,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB07,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB08,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB09,z-score > 3 on power (global mean/std),1,0,0,0.0,0,0,0,0
+TB10,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB11,z-score > 3 on power (global mean/std),0,0,0,0.0,0,0,0,0
+TB12,z-score > 3 on power (global mean/std),1,0,0,0.0,0,0,0,0

@@ -1,0 +1,11 @@
+target,horizon,feature_set,n_features,r2,rmse_kw,nmae_pct,n_samples,nwp_source
+TB02_power,6hour,scada_only,150,0.3612,500.88,17.949,21392,stub_synthetic
+TB02_power,6hour,scada_plus_nwp,150,0.8486,243.82,8.324,21394,stub_synthetic
+TB02_power,24hour,scada_only,150,0.3065,518.84,18.662,20754,stub_synthetic
+TB02_power,24hour,scada_plus_nwp,150,0.8614,231.97,7.951,20754,stub_synthetic
+TB01_power,24hour,scada_only,150,0.3002,517.43,18.841,20831,stub_synthetic
+TB01_power,24hour,scada_plus_nwp,150,0.8483,240.9,8.124,20831,stub_synthetic
+farm_total_power,6hour,scada_only,150,0.3726,5438.85,195.576,21599,stub_synthetic
+farm_total_power,6hour,scada_plus_nwp,150,0.912,2037.31,71.522,21430,stub_synthetic
+farm_total_power,24hour,scada_only,150,0.2789,5786.55,211.525,21597,stub_synthetic
+farm_total_power,24hour,scada_plus_nwp,150,0.9162,1975.1,70.238,20829,stub_synthetic

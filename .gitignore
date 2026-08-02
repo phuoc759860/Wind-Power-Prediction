@@ -19,9 +19,9 @@ logs_pipeline_run.txt
 .venv/
 venv/
 
-# Generated outputs
-outputs/
-!outputs/.gitkeep
+# Generated outputs (derived artifacts are committed; the >100 MB raw
+# prediction dump exceeds GitHub's file limit and is regenerable)
+outputs/forecasts/forecasts.csv
 
 # Generated xlsx
 xlsx/*

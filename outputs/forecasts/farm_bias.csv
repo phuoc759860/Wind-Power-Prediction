@@ -1,0 +1,6 @@
+horizon,n_samples,actual_mean_kw,farm_model_mean_kw,bias_kw,bias_pct_rated,mae_kw,farm_vs_sum_turbines_kw,n_at_capacity,n_zero_power,note
+10min,28232,5536.46,5783.48,247.02,0.936,813.75,-59.51,0,8931,Direct farm model vs sum of 12 turbine models. Bias > 0 means the farm model over-forecasts on average.
+30min,28232,5537.26,6644.31,1107.05,4.193,2299.36,463.97,0,8930,Direct farm model vs sum of 12 turbine models. Bias > 0 means the farm model over-forecasts on average.
+1hour,28232,5538.41,6229.2,690.79,2.617,2459.64,61.5,0,8929,Direct farm model vs sum of 12 turbine models. Bias > 0 means the farm model over-forecasts on average.
+6hour,28232,5548.89,6997.6,1448.71,5.488,4393.73,-102.87,0,8907,Direct farm model vs sum of 12 turbine models. Bias > 0 means the farm model over-forecasts on average.
+24hour,28232,5598.0,6568.68,970.68,3.677,4670.31,-504.32,0,8874,Direct farm model vs sum of 12 turbine models. Bias > 0 means the farm model over-forecasts on average.
