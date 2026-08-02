@@ -37,12 +37,30 @@ def _get_split_dfs():
     horizons = config.get("forecasting", {}).get("horizons", [])
     feature_data = create_target_columns(feature_data, horizons)
     split_cfg = config.get("training", {}).get("split", {})
-    return split_by_time(
+    train_df, val_df, test_df = split_by_time(
         feature_data,
         train_ratio=split_cfg.get("train_ratio", 0.7),
         val_ratio=split_cfg.get("validation_ratio", 0.15),
         test_ratio=split_cfg.get("test_ratio", 0.15),
     )
+    return train_df, val_df, _official_test_window(test_df)
+
+
+def _official_test_window(test_df):
+    """P0-01: drop rows at/after the report cutoff from the OFFICIAL test window.
+
+    The raw source extends past the report date; those rows are flagged
+    is_simulated=1 by preprocessing and must not back official claims.
+    """
+    if "is_simulated" in test_df.columns:
+        test_df = test_df[test_df["is_simulated"] == 0]
+    else:
+        config = load_config()
+        report_date = config.get("data", {}).get("report_date")
+        if report_date:
+            cutoff = pd.Timestamp(report_date)
+            test_df = test_df[test_df["timestamp"] < cutoff]
+    return test_df
 
 
 def get_test_data():

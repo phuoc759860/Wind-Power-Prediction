@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-01 10:12:37",
-  "git_commit": "c386c0659496e3b59c574bfa3b840e69cb79bde0",
+  "generated_at": "2026-08-02 09:57:51",
+  "git_commit": "450570a3a398e537a816b32bbf9cb9abd4fe6ae7",
   "categories": {
     "data_processed": {
       "directory": "data/processed",
@@ -25,7 +25,7 @@
         {
           "filename": "alert_accuracy.json",
           "size_bytes": 77221,
-          "modified": "2026-08-01T01:36:10.785920"
+          "modified": "2026-08-01T10:50:41.045043"
         },
         {
           "filename": "alert_screening_summary.json",
@@ -35,7 +35,7 @@
         {
           "filename": "anomaly_accuracy.json",
           "size_bytes": 7339,
-          "modified": "2026-08-01T01:36:12.392991"
+          "modified": "2026-08-01T10:50:42.901242"
         },
         {
           "filename": "availability_report.json",
@@ -79,8 +79,8 @@
         },
         {
           "filename": "inventory_summary.json",
-          "size_bytes": 114505,
-          "modified": "2026-08-01T01:38:42.794244"
+          "size_bytes": 108493,
+          "modified": "2026-08-02T09:57:32.684161"
         },
         {
           "filename": "leakage_audit.csv",
@@ -120,7 +120,7 @@
         {
           "filename": "tb12_analysis.json",
           "size_bytes": 4386,
-          "modified": "2026-08-01T01:36:10.703152"
+          "modified": "2026-08-01T10:50:40.965857"
         },
         {
           "filename": "timestamp_audit.csv",
@@ -141,7 +141,7 @@
     },
     "outputs_forecasts": {
       "directory": "outputs/forecasts",
-      "n_files": 21,
+      "n_files": 20,
       "files": [
         {
           "filename": "alert_accuracy.csv",
@@ -181,8 +181,8 @@
         },
         {
           "filename": "evaluation_metrics.csv",
-          "size_bytes": 33452,
-          "modified": "2026-08-01T10:05:16.418116",
+          "size_bytes": 35198,
+          "modified": "2026-08-01T10:49:40.638245",
           "n_rows": 260
         },
         {
@@ -193,8 +193,8 @@
         },
         {
           "filename": "farm_bias.csv",
-          "size_bytes": 987,
-          "modified": "2026-08-01T01:36:09.934494",
+          "size_bytes": 984,
+          "modified": "2026-08-01T10:50:40.068722",
           "n_rows": 5
         },
         {
@@ -205,14 +205,14 @@
         },
         {
           "filename": "farm_horizon_window_check.csv",
-          "size_bytes": 5479,
-          "modified": "2026-08-01T01:36:10.325119",
+          "size_bytes": 5471,
+          "modified": "2026-08-01T10:50:40.520934",
           "n_rows": 20
         },
         {
           "filename": "farm_metrics.csv",
           "size_bytes": 2679,
-          "modified": "2026-08-01T01:36:09.934494",
+          "modified": "2026-08-01T10:50:40.068722",
           "n_rows": 10
         },
         {
@@ -232,11 +232,6 @@
           "size_bytes": 3063299,
           "modified": "2026-08-01T10:10:26.365066",
           "n_rows": 39120
-        },
-        {
-          "filename": "pytest_report.txt",
-          "size_bytes": 1614,
-          "modified": "2026-07-31T15:12:31.255983"
         },
         {
           "filename": "ramp_alert.csv",
@@ -421,8 +416,8 @@
         },
         {
           "filename": "25_farm_bias_calibration.png",
-          "size_bytes": 316029,
-          "modified": "2026-08-01T01:36:10.203471"
+          "size_bytes": 319297,
+          "modified": "2026-08-01T10:50:40.384109"
         },
         {
           "filename": "evaluation_results.csv",
@@ -448,38 +443,8 @@
     },
     "models": {
       "directory": "models",
-      "n_files": 556,
+      "n_files": 520,
       "files": [
-        {
-          "filename": "farm_total_power_features.json",
-          "size_bytes": 15245,
-          "modified": "2026-07-27T18:15:35.673549"
-        },
-        {
-          "filename": "farm_total_power_lightgbm_features.json",
-          "size_bytes": 3330,
-          "modified": "2026-07-27T17:10:07.872837"
-        },
-        {
-          "filename": "farm_total_power_lightgbm_model.joblib",
-          "size_bytes": 459729,
-          "modified": "2026-07-27T17:10:07.869837"
-        },
-        {
-          "filename": "farm_total_power_lightgbm_scaler.joblib",
-          "size_bytes": 4215,
-          "modified": "2026-07-27T17:10:07.871838"
-        },
-        {
-          "filename": "farm_total_power_model.joblib",
-          "size_bytes": 623436,
-          "modified": "2026-07-27T18:15:35.671537"
-        },
-        {
-          "filename": "farm_total_power_scaler.joblib",
-          "size_bytes": 15695,
-          "modified": "2026-07-27T18:15:35.673549"
-        },
         {
           "filename": "farm_total_power_target_10min_lightgbm_features.json",
           "size_bytes": 3324,
@@ -679,51 +644,6 @@
           "filename": "farm_total_power_target_6hour_xgboost_scaler.joblib",
           "size_bytes": 7847,
           "modified": "2026-08-01T10:03:47.255529"
-        },
-        {
-          "filename": "farm_total_power_xgboost_features.json",
-          "size_bytes": 3330,
-          "modified": "2026-07-27T17:10:07.848447"
-        },
-        {
-          "filename": "farm_total_power_xgboost_model.joblib",
-          "size_bytes": 722677,
-          "modified": "2026-07-27T17:10:07.846404"
-        },
-        {
-          "filename": "farm_total_power_xgboost_scaler.joblib",
-          "size_bytes": 4215,
-          "modified": "2026-07-27T17:10:07.848447"
-        },
-        {
-          "filename": "TB01_power_features.json",
-          "size_bytes": 15251,
-          "modified": "2026-07-27T18:15:35.642579"
-        },
-        {
-          "filename": "TB01_power_lightgbm_features.json",
-          "size_bytes": 3332,
-          "modified": "2026-07-27T17:10:07.717234"
-        },
-        {
-          "filename": "TB01_power_lightgbm_model.joblib",
-          "size_bytes": 450286,
-          "modified": "2026-07-27T17:10:07.714182"
-        },
-        {
-          "filename": "TB01_power_lightgbm_scaler.joblib",
-          "size_bytes": 4215,
-          "modified": "2026-07-27T17:10:07.716235"
-        },
-        {
-          "filename": "TB01_power_model.joblib",
-          "size_bytes": 592603,
-          "modified": "2026-07-27T18:15:35.634498"
-        },
-        {
-          "filename": "TB01_power_scaler.joblib",
-          "size_bytes": 15695,
-          "modified": "2026-07-27T18:15:35.639220"
         },
         {
           "filename": "TB01_power_target_10min_lightgbm_features.json",
@@ -926,51 +846,6 @@
           "modified": "2026-08-01T10:03:46.046344"
         },
         {
-          "filename": "TB01_power_xgboost_features.json",
-          "size_bytes": 3332,
-          "modified": "2026-07-27T17:10:07.689862"
-        },
-        {
-          "filename": "TB01_power_xgboost_model.joblib",
-          "size_bytes": 719948,
-          "modified": "2026-07-27T17:10:07.684829"
-        },
-        {
-          "filename": "TB01_power_xgboost_scaler.joblib",
-          "size_bytes": 4215,
-          "modified": "2026-07-27T17:10:07.687855"
-        },
-        {
-          "filename": "TB02_power_features.json",
-          "size_bytes": 15251,
-          "modified": "2026-07-27T18:15:35.653752"
-        },
-        {
-          "filename": "TB02_power_lightgbm_features.json",
-          "size_bytes": 3341,
-          "modified": "2026-07-27T17:10:07.766225"
-        },
-        {
-          "filename": "TB02_power_lightgbm_model.joblib",
-          "size_bytes": 448203,
-          "modified": "2026-07-27T17:10:07.764719"
-        },
-        {
-          "filename": "TB02_power_lightgbm_scaler.joblib",
-          "size_bytes": 4215,
-          "modified": "2026-07-27T17:10:07.766225"
-        },
-        {
-          "filename": "TB02_power_model.joblib",
-          "size_bytes": 596859,
-          "modified": "2026-07-27T18:15:35.650751"
-        },
-        {
-          "filename": "TB02_power_scaler.joblib",
-          "size_bytes": 15695,
-          "modified": "2026-07-27T18:15:35.651742"
-        },
-        {
           "filename": "TB02_power_target_10min_lightgbm_features.json",
           "size_bytes": 3329,
           "modified": "2026-08-01T10:03:46.097822"
@@ -1171,51 +1046,6 @@
           "modified": "2026-08-01T10:03:46.149194"
         },
         {
-          "filename": "TB02_power_xgboost_features.json",
-          "size_bytes": 3341,
-          "modified": "2026-07-27T17:10:07.744011"
-        },
-        {
-          "filename": "TB02_power_xgboost_model.joblib",
-          "size_bytes": 729816,
-          "modified": "2026-07-27T17:10:07.741315"
-        },
-        {
-          "filename": "TB02_power_xgboost_scaler.joblib",
-          "size_bytes": 4215,
-          "modified": "2026-07-27T17:10:07.743005"
-        },
-        {
-          "filename": "TB03_power_features.json",
-          "size_bytes": 15251,
-          "modified": "2026-07-27T18:15:35.656372"
-        },
-        {
-          "filename": "TB03_power_lightgbm_features.json",
-          "size_bytes": 3341,
-          "modified": "2026-07-27T17:10:07.821262"
-        },
-        {
-          "filename": "TB03_power_lightgbm_model.joblib",
-          "size_bytes": 447005,
-          "modified": "2026-07-27T17:10:07.820216"
-        },
-        {
-          "filename": "TB03_power_lightgbm_scaler.joblib",
-          "size_bytes": 4215,
-          "modified": "2026-07-27T17:10:07.821262"
-        },
-        {
-          "filename": "TB03_power_model.joblib",
-          "size_bytes": 597020,
-          "modified": "2026-07-27T18:15:35.656372"
-        },
-        {
-          "filename": "TB03_power_scaler.joblib",
-          "size_bytes": 15695,
-          "modified": "2026-07-27T18:15:35.656372"
-        },
-        {
           "filename": "TB03_power_target_10min_lightgbm_features.json",
           "size_bytes": 3329,
           "modified": "2026-08-01T10:03:46.197943"
@@ -1414,21 +1244,6 @@
           "filename": "TB03_power_target_6hour_xgboost_scaler.joblib",
           "size_bytes": 7879,
           "modified": "2026-08-01T10:03:46.244663"
-        },
-        {
-          "filename": "TB03_power_xgboost_features.json",
-          "size_bytes": 3341,
-          "modified": "2026-07-27T17:10:07.800257"
-        },
-        {
-          "filename": "TB03_power_xgboost_model.joblib",
-          "size_bytes": 734783,
-          "modified": "2026-07-27T17:10:07.798262"
-        },
-        {
-          "filename": "TB03_power_xgboost_scaler.joblib",
-          "size_bytes": 4215,
-          "modified": "2026-07-27T17:10:07.799258"
         },
         {
           "filename": "TB04_power_target_10min_lightgbm_features.json",
@@ -3234,12 +3049,12 @@
     },
     "logs": {
       "directory": "logs",
-      "n_files": 12,
+      "n_files": 6,
       "files": [
         {
           "filename": "api_audit.log",
-          "size_bytes": 189943,
-          "modified": "2026-08-01T00:06:20.190204"
+          "size_bytes": 196447,
+          "modified": "2026-08-01T15:17:58.316402"
         },
         {
           "filename": "api_benchmark_server.log",
@@ -3248,13 +3063,8 @@
         },
         {
           "filename": "model_benchmark.json",
-          "size_bytes": 463,
-          "modified": "2026-07-30T13:58:39.481840"
-        },
-        {
-          "filename": "pipeline_full.log",
-          "size_bytes": 0,
-          "modified": "2026-07-31T13:40:08.056062"
+          "size_bytes": 10234,
+          "modified": "2026-08-01T15:19:21.641570"
         },
         {
           "filename": "pipeline_full_err.log",
@@ -3262,34 +3072,9 @@
           "modified": "2026-07-31T14:33:30.673478"
         },
         {
-          "filename": "pipeline_run.log",
-          "size_bytes": 0,
-          "modified": "2026-07-31T13:37:41.131539"
-        },
-        {
           "filename": "pipeline_run_err.log",
           "size_bytes": 28823,
           "modified": "2026-07-31T16:57:01.575595"
-        },
-        {
-          "filename": "pipeline_run_output.log",
-          "size_bytes": 0,
-          "modified": "2026-07-31T16:50:14.013525"
-        },
-        {
-          "filename": "rerun_started.txt",
-          "size_bytes": 169,
-          "modified": "2026-08-01T00:50:44.867047"
-        },
-        {
-          "filename": "rerun_stderr.log",
-          "size_bytes": 2001,
-          "modified": "2026-08-01T09:21:15.831811"
-        },
-        {
-          "filename": "rerun_stdout.log",
-          "size_bytes": 0,
-          "modified": "2026-08-01T09:14:13.580990"
         },
         {
           "filename": "wind_forecasting.log",
@@ -3301,23 +3086,26 @@
   },
   "counts": {
     "api_endpoints": {
-      "GET": 22,
-      "POST": 3,
-      "PUT": 1,
-      "DELETE": 1,
-      "total": 27
+      "GET": 0,
+      "POST": 0,
+      "PUT": 0,
+      "DELETE": 0,
+      "total": 0
     },
     "tests": {
       "test_files": 9,
-      "test_cases": 119
+      "test_cases": 125
     },
     "models": {
-      "total_model_files": 284,
+      "ml_models": 130,
       "per_model_type": {
-        "lightgbm": 69,
-        "other": 146,
-        "xgboost": 69
-      }
+        "lightgbm": 65,
+        "xgboost": 65
+      },
+      "ml_models_complete": 130,
+      "total_artifacts": 520,
+      "total_joblib_files": 260,
+      "baseline_evaluations": 10
     },
     "raw_data": {
       "n_files": 11,
@@ -3326,8 +3114,8 @@
     "walk_forward_baseline_evaluations": 10,
     "evaluation_rows": 260,
     "evaluation_by_model": {
-      "xgboost": 65,
       "lightgbm": 65,
+      "xgboost": 65,
       "persistence": 65,
       "ridge": 65
     }

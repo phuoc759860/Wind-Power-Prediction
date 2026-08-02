@@ -11,6 +11,10 @@ data:
   timestamp_column: "PCTimeStamp"
   timezone: "Asia/Ho_Chi_Minh"
   sampling_interval_minutes: 10
+  # Official report as-of date (inclusive evaluation cutoff). Any row at or
+  # after this timestamp is treated as simulated / beyond-report and excluded
+  # from the official evaluation window (see P0-01).
+  report_date: "2026-08-01"
   file_pattern: "*.xlsx"
   supported_formats: [".xlsx", ".xls", ".csv", ".parquet", ".json"]
   max_upload_size_mb: 500

@@ -5,19 +5,28 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+PROVENANCE_COLUMNS = ("is_observed", "is_synthetic", "is_imputed", "is_simulated")
+
 
 def handle_missing_values(df: pd.DataFrame, max_gap: int = 12) -> pd.DataFrame:
     df = df.copy()
     feature_cols = [c for c in df.columns if c not in ["timestamp", "data_split"]
                     and not c.endswith("_missing") and not c.endswith("_status")
-                    and "farm_" not in c]
+                    and "farm_" not in c and c not in PROVENANCE_COLUMNS]
+
+    if "is_imputed" not in df.columns:
+        df["is_imputed"] = 0
 
     for col in feature_cols:
-        null_count = df[col].isnull().sum()
+        null_mask = df[col].isnull()
+        null_count = null_mask.sum()
         if null_count == 0:
             continue
 
         df[col] = df[col].ffill(limit=max_gap)
+
+        filled_mask = null_mask & df[col].notna()
+        df.loc[filled_mask, "is_imputed"] = 1
 
         remaining = df[col].isnull().sum()
         filled = null_count - remaining
@@ -49,14 +58,21 @@ def enforce_sampling_interval(
     if timestamp_col not in df.columns:
         return df
 
+    original_index = df[timestamp_col].values.copy()
     df = df.set_index(timestamp_col)
     idx = pd.date_range(start=df.index.min(), end=df.index.max(), freq=f"{interval_minutes}min")
     df = df.reindex(idx)
     df.index.name = timestamp_col
     df = df.reset_index()
 
-    new_rows = len(df) - len(df.dropna(subset=[c for c in df.columns if c != timestamp_col]))
-    logger.info(f"Reindexed to {interval_minutes}min intervals: {len(df)} rows ({new_rows} new empty rows)")
+    observed = df[timestamp_col].isin(pd.Series(original_index, dtype=df[timestamp_col].dtype)).astype(int)
+    df["is_observed"] = observed
+    df["is_synthetic"] = 1 - observed
+
+    new_rows = len(df) - len(df.dropna(subset=[c for c in df.columns
+                                               if c not in [timestamp_col, "is_observed", "is_synthetic"]]))
+    logger.info(f"Reindexed to {interval_minutes}min intervals: {len(df)} rows "
+                f"({new_rows} new synthetic/empty rows, {int(observed.sum())} observed)")
     return df
 
 
@@ -117,7 +133,7 @@ def create_missing_flags(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     base_cols = [c for c in df.columns if c not in ["timestamp", "data_split"]
                  and not c.endswith("_missing") and not c.endswith("_status")
-                 and "farm_" not in c]
+                 and "farm_" not in c and c not in PROVENANCE_COLUMNS]
     for col in base_cols:
         df[f"{col}_missing"] = df[col].isnull().astype(int)
 
@@ -153,12 +169,16 @@ def detect_operating_status(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def preprocess_pipeline(df: pd.DataFrame, config: dict) -> pd.DataFrame:
+def preprocess_pipeline(df: pd.DataFrame, config: dict, evaluation_cutoff=None) -> pd.DataFrame:
     logger.info("=" * 60)
     logger.info("PREPROCESSING PIPELINE")
     logger.info("=" * 60)
 
     interval = config.get("data", {}).get("sampling_interval_minutes", 10)
+
+    for flag in ("is_observed", "is_synthetic", "is_imputed"):
+        if flag not in df.columns:
+            df[flag] = 1 if flag == "is_observed" else 0
 
     logger.info("Step 1: Removing duplicates...")
     df = remove_duplicates(df)
@@ -182,8 +202,14 @@ def preprocess_pipeline(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     logger.info("Step 7: Detecting operating status...")
     df = detect_operating_status(df)
 
+    logger.info("Step 8: Marking simulated / beyond-report rows...")
+    df["is_simulated"] = 0
+    if evaluation_cutoff is not None:
+        df.loc[df["timestamp"] >= evaluation_cutoff, "is_simulated"] = 1
+
     total_nulls = df.isnull().sum().sum()
     logger.info(f"Preprocessing complete: {df.shape[0]} rows, {df.shape[1]} columns")
     logger.info(f"Remaining nulls: {total_nulls}")
+    logger.info(f"Simulated (beyond-report) rows: {int(df['is_simulated'].sum())}")
 
     return df

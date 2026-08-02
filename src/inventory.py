@@ -95,22 +95,54 @@ def _count_test_cases(base_dir: Path) -> dict:
 
 
 def _count_models(base_dir: Path) -> dict:
+    """Separate ML models, baseline evaluations and total artifacts (P0-02).
+
+    Each trained ML model key produces exactly 4 files in models/:
+    <key>_model.joblib (the model), <key>_scaler.joblib (the scaler),
+    <key>_features.json and <key>_metadata.json. The authoritative "ML
+    models" count is therefore the number of *_model.joblib files — never a
+    cross-product of evaluation-table columns, which over-counts (P0-02).
+    """
     models_dir = base_dir / "models"
-    counts = {"total_model_files": 0}
-    if models_dir.exists():
-        joblib = list(models_dir.glob("*.joblib"))
-        counts["total_model_files"] = len(joblib)
-        from collections import Counter
-        per_type = Counter()
-        for f in joblib:
-            name = f.name.replace("_model.joblib", "")
-            if name.endswith("_lightgbm"):
-                per_type["lightgbm"] += 1
-            elif name.endswith("_xgboost"):
-                per_type["xgboost"] += 1
-            else:
-                per_type["other"] += 1
-        counts["per_model_type"] = dict(per_type)
+    counts = {"ml_models": 0, "per_model_type": {}, "ml_models_complete": 0,
+              "total_artifacts": 0, "total_joblib_files": 0,
+              "baseline_evaluations": 0}
+    if not models_dir.exists():
+        return counts
+
+    model_files = sorted(models_dir.glob("*_model.joblib"))
+    ml_keys = [f.name[: -len("_model.joblib")] for f in model_files]
+    counts["ml_models"] = len(ml_keys)
+
+    from collections import Counter
+    per_type = Counter()
+    for key in ml_keys:
+        if key.endswith("_lightgbm"):
+            per_type["lightgbm"] += 1
+        elif key.endswith("_xgboost"):
+            per_type["xgboost"] += 1
+        else:
+            per_type["other"] += 1
+    counts["per_model_type"] = dict(per_type)
+
+    counts["total_joblib_files"] = len(list(models_dir.glob("*.joblib")))
+
+    complete = 0
+    for key in ml_keys:
+        if all((models_dir / f"{key}{suffix}").exists() for suffix in
+               ["_model.joblib", "_scaler.joblib", "_features.json", "_metadata.json"]):
+            complete += 1
+    counts["ml_models_complete"] = complete
+    counts["total_artifacts"] = complete * 4
+
+    wf = base_dir / "data" / "metadata" / "walk_forward_summary.json"
+    if wf.exists():
+        try:
+            with open(wf, "r", encoding="utf-8") as f:
+                wf_data = json.load(f)
+            counts["baseline_evaluations"] = len(wf_data.get("summary", {})) or len(wf_data)
+        except Exception:
+            pass
     return counts
 
 
@@ -169,7 +201,8 @@ def generate_inventory(base_dir: Path) -> dict:
     if wf.exists():
         try:
             with open(wf, "r", encoding="utf-8") as f:
-                inventory["counts"]["walk_forward_baseline_evaluations"] = len(json.load(f))
+                wf_data = json.load(f)
+            inventory["counts"]["walk_forward_baseline_evaluations"] = len(wf_data.get("summary", {})) or len(wf_data)
         except Exception:
             pass
     ev = base_dir / "outputs" / "forecasts" / "evaluation_metrics.csv"

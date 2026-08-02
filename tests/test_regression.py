@@ -42,6 +42,13 @@ def test_data_and_models():
                                    train_ratio=split_cfg.get("train_ratio", 0.7),
                                    val_ratio=split_cfg.get("validation_ratio", 0.15),
                                    test_ratio=split_cfg.get("test_ratio", 0.15))
+    # P0-01: evaluate only on the OFFICIAL window (rows before the report cutoff).
+    if "is_simulated" in test_df.columns:
+        test_df = test_df[test_df["is_simulated"] == 0]
+    else:
+        report_date = config.get("data", {}).get("report_date")
+        if report_date:
+            test_df = test_df[pd.to_datetime(test_df["timestamp"]) < pd.Timestamp(report_date)]
     models = load_models(str(base / "models"))
     return test_df, models
 

@@ -249,6 +249,8 @@ class ReportBuilder:
         self.raw_coverage = json.load(open(raw_cov_path)) if raw_cov_path.exists() else {}
         reidx_path = META_DIR / "reindex_additions.json"
         self.reindex = json.load(open(reidx_path)) if reidx_path.exists() else {}
+        eval_win_path = META_DIR / "evaluation_window.json"
+        self.eval_window = json.load(open(eval_win_path)) if eval_win_path.exists() else {}
         leak_path = META_DIR / "leakage_audit.csv"
         self.leakage_audit_exists = leak_path.exists()
         self.leakage_df = pd.read_csv(leak_path) if self.leakage_audit_exists else pd.DataFrame()
@@ -272,6 +274,15 @@ class ReportBuilder:
         self.csv_files = sorted(CSV_DIR.glob("*.csv"))
         self.n_csv = len(self.csv_files)
         self.model_joblibs = len(list((BASE / "models").glob("*.joblib")))
+        inv_counts = self.inventory.get("counts", {}) if self.inventory else {}
+        inv_models = inv_counts.get("models", {}) if isinstance(inv_counts, dict) else {}
+        self.ml_models = int(inv_models.get("ml_models", 0) or 0) or len(list((BASE / "models").glob("*_model.joblib")))
+        self.ml_models_complete = int(inv_models.get("ml_models_complete", 0) or 0)
+        self.model_artifacts_total = int(inv_models.get("total_artifacts", 0) or 0) or self.ml_models * 4
+        self.baseline_evaluations = int(inv_models.get("baseline_evaluations", 0) or 0)
+        # P0-02: ML model count comes from the actual *_model.joblib files via
+        # inventory_summary.json, never a cross-product of eval-table columns.
+        self.model_count = self.ml_models
         if not self.eval_df.empty:
             tb_only = self.eval_df[self.eval_df["target"].str.startswith("TB")]
             self.avg_r2_by_horizon = tb_only.groupby(["horizon", "model"])["r2"].agg(["mean", "std"]).round(4)
@@ -289,7 +300,6 @@ class ReportBuilder:
         exp_rows = self.audit.get("expected_timestamps_10min", 0)
         self.raw_data_rows = raw_rows
         self.exp_data_rows = exp_rows
-        self.model_count = len({k for k in self.eval_df["target"].unique()}) * self.eval_df["model"].nunique() * self.eval_df["horizon"].nunique() if not self.eval_df.empty else 0
 
         api_src_path = BASE / "src" / "api.py"
         self.api_endpoint_list = []
@@ -332,7 +342,7 @@ class ReportBuilder:
             ["Project", "Multi-Horizon Wind Power Forecasting"],
             ["Farm Capacity", "26.4 MW (12 x 2,200 kW Turbines)"],
             ["Raw Data Period", data_period],
-            ["Models", f"XGBoost + LightGBM ({self.model_joblibs} artifacts)"],
+            ["Models", f"XGBoost + LightGBM ({self.ml_models} ML models, {self.model_artifacts_total} artifacts)"],
             ["Horizons", "10 min, 30 min, 1 h, 6 h, 24 h"],
             ["API Framework", f"FastAPI + Uvicorn ({self.n_api_endpoints} endpoints)"],
             ["", ""],
@@ -431,7 +441,7 @@ class ReportBuilder:
             best_info = f"{self.best_row['target']} ({self.best_row['model']}, {self.best_row['horizon']})"
 
         data_pt_label = f"{self.exp_data_rows:,}" if self.exp_data_rows else "~312,000"
-        model_label = f"{self.model_count}" if self.model_count else "130"
+        model_label = f"{self.ml_models}" if self.ml_models else "130"
         rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
         raw_pts = rc.get("n_rows", 0)
         raw_gaps = rc.get("n_missing_timestamps", 0)
@@ -439,8 +449,11 @@ class ReportBuilder:
 
         self.story.append(Paragraph(
             f"<b>Key Results:</b> The best-performing model achieves R<super>2</super> = <b>{best_r2:.4f}</b> "
-            f"({best_info}). The system includes {self.model_joblibs} model artifacts ({model_label} models) "
-            "covering all 12 turbines plus farm-level aggregation across 5 forecast horizons. A FastAPI-based "
+            f"({best_info}). The system includes <b>{self.ml_models} ML models</b> "
+            f"({model_label} = 13 targets x 2 algorithms x 5 horizons, counted from the actual "
+            f"<i>*_model.joblib</i> files), <b>{self.baseline_evaluations} baseline evaluations</b> "
+            f"(walk-forward persistence + ridge), and <b>{self.model_artifacts_total} model artifacts</b> "
+            "(model + scaler + features + metadata per trained key). A FastAPI-based "
             f"REST API serves {self.n_api_endpoints} endpoints including real-time prediction, evaluation metrics, "
             "and alert generation. The system writes every output file according to the project output "
             "schema (Section 15: Dinh dang file dau ra) with defined column names, forecast_quality labels, "
@@ -466,8 +479,9 @@ class ReportBuilder:
             ["Total Capacity", "26.4 MW"],
             ["Raw Timestamps (unique)", f"{raw_pts:,}" if raw_pts else data_pt_label],
             ["Raw Missing Timestamps", f"{raw_gaps:,}" if raw_gaps else "n/a"],
-            ["Models Trained", f"{model_label} (13 targets x 2 algorithms x 5 horizons)"],
-            ["Model Artifacts", f"{self.model_joblibs} (.joblib + scalers + feature lists)"],
+            ["Models Trained", f"{self.ml_models} ML models (13 targets x 2 algorithms x 5 horizons)"],
+            ["Baseline Evaluations", f"{self.baseline_evaluations} (walk-forward persistence + ridge)"],
+            ["Model Artifacts", f"{self.model_artifacts_total} (model + scaler + features + metadata per key)"],
             ["Best R2", f"{best_r2:.4f} ({best_info})"],
             ["Avg Availability", f"{self.avg_availability:.2f}%"],
             ["Output Files", f"{self.n_csv} CSV files (Section 15 output schema)"],
@@ -545,15 +559,23 @@ class ReportBuilder:
             s["BodyText2"],
         ))
 
+        ew = self.eval_window
+        ew_cut = ew.get("evaluation_cutoff")
+        ew_excl = ew.get("n_test_rows_excluded_simulated", 0)
         self.story.append(Paragraph(
-            "<b>Important data caveats (reported for transparency):</b> (1) the raw files extend to the "
-            f"end of 2026, so the time-series split (Section 4.3) necessarily places the latest "
-            "<b>un-validated</b> records in the test set — the 'future' segment is treated as a "
-            "pre-production forecast rehearsal, not as a claim about operational forecast skill; "
+            "<b>Important data caveats (reported for transparency):</b> (1) the raw source files extend "
+            f"beyond the report date (raw union end {ew.get('raw_union_end', ts_end)[:10]}), so the "
+            "official evaluation window is explicitly cut at "
+            f"<b>evaluation_cutoff = min(report_date, raw_union_end) = {ew_cut[:10] if ew_cut else 'report date'}</b> "
+            f"(report date {ew.get('report_date', 'N/A')[:10]}). All test rows at/after the cutoff are flagged "
+            "<b>is_simulated=1</b> in the processed data and are <b>excluded from the official evaluation</b> "
+            f"({ew_excl:,} rows set aside); every metric in this report is computed only on the official "
+            f"window (test window ends {ew.get('test_window_official_end', 'N/A')[:10]}). "
             "(2) to obtain a regular 10-minute grid the pipeline re-indexes the timestamp axis, which "
             f"introduces <b>{n_synth:,} synthetic rows</b> out of {n_proc:,} processed timestamps "
             "(synthetic_ratio {self.reindex.get('synthetic_ratio_pct', 0):.2f}%) — these rows are "
-            "forward-filled with observed values and are excluded from the leakage audit (Section 4.4).",
+            "forward-filled with observed values, flagged is_synthetic/is_imputed=1, and are excluded "
+            "from the leakage audit (Section 4.4).",
             s["BodyText2"],
         ))
 
@@ -759,12 +781,16 @@ class ReportBuilder:
         ))
 
         self.story.append(Paragraph("4.4  Model Training", s["SectionH2"]))
-        model_label = f"{self.model_count}" if self.model_count else "130"
         self.story.append(Paragraph(
             "Two gradient boosting algorithms were used: XGBoost and LightGBM. Both models were trained "
             "with identical hyperparameters for fair comparison. Each target variable (12 turbines + farm "
             "aggregate x 5 horizons) received independent model training, resulting in "
-            f"{model_label} models total ({self.model_joblibs} files including scalers and feature lists).",
+            f"<b>{self.ml_models} ML models</b> (13 targets x 2 algorithms x 5 horizons). This count is read "
+            f"from the actual <i>*_model.joblib</i> files in <i>models/</i> via "
+            "<i>inventory_summary.json</i>, not computed by multiplication. Each trained key is stored as "
+            f"4 artifacts (model + scaler + feature list + metadata), i.e. <b>{self.model_artifacts_total} "
+            f"files</b>; the {self.baseline_evaluations} baseline evaluations (persistence + ridge x 5 "
+            "horizons) are trained and evaluated separately via walk-forward validation.",
             s["BodyText2"],
         ))
 
@@ -1327,7 +1353,8 @@ class ReportBuilder:
         self.story.append(Paragraph("6.1  System Architecture", s["SectionH2"]))
         self.story.append(Paragraph(
             "The forecasting system is served through a FastAPI REST API with an interactive web dashboard. "
-            f"At startup, the system loads all {self.model_joblibs} model artifacts into memory for "
+            f"At startup, the system loads all {self.model_artifacts_total} model artifacts ({self.ml_models} "
+            "ML models + scalers + feature lists + metadata) into memory for "
             "low-latency inference. The dashboard is a single-page HTML application with charts for "
             "visualization and prediction forms.",
             s["BodyText2"],
@@ -1338,8 +1365,8 @@ class ReportBuilder:
             ["API Framework", "FastAPI 0.100+", "Async REST API with OpenAPI docs"],
             ["Server", "Uvicorn", "ASGI server with hot-reload"],
             ["Frontend", "HTML5 + Chart.js", "Interactive dashboard"],
-            ["ML Models", "XGBoost + LightGBM", f"{self.model_count} trained models"],
-            ["Model Storage", "Joblib + JSON", f"{self.model_joblibs} files in models/"],
+            ["ML Models", "XGBoost + LightGBM", f"{self.ml_models} trained ML models"],
+            ["Model Storage", "Joblib + JSON", f"{self.model_artifacts_total} artifacts in models/"],
             ["Data Format", "Parquet + CSV", "Fast I/O for large datasets"],
             ["Authentication", "API key (env var)", "Fail-closed: 401/403 without valid key"],
             ["CORS", "Restricted origins", "Default localhost:8000 only"],
@@ -1477,11 +1504,11 @@ class ReportBuilder:
         structure = [
             ["Directory / File", "Purpose"],
             ["src/", "16 Python modules: loading, validation, preprocessing, feature engineering, training, evaluation, audit, inventory, API, prediction"],
-            ["models/", f"{self.model_joblibs} model artifacts (.joblib + scalers + feature lists)"],
+            ["models/", f"{self.model_artifacts_total} artifacts: {self.ml_models} ML models (model + scaler + features + metadata per key)"],
             ["configs/", "config.yaml, compliance_matrix.csv (no API key file — key via API_KEY env var)"],
             ["data/raw/", "11 SCADA Excel files (raw, read-only)"],
             ["data/processed/", "Combined and preprocessed Parquet files"],
-            ["data/metadata/", "JSON/CSV metadata: raw_coverage_audit, split_statistics, reindex_additions, leakage_audit, horizon_sample_counts, inventory_summary, data_manifest, walk_forward, etc."],
+            ["data/metadata/", "JSON/CSV metadata: raw_coverage_audit, split_statistics, evaluation_window, reindex_additions, leakage_audit, horizon_sample_counts, inventory_summary, data_manifest, walk_forward, etc."],
             ["outputs/forecasts/", f"{self.n_csv} CSV output files (Section 15 output schema)"],
             ["outputs/figures/", "PNG validation charts incl. farm-bias calibration"],
             ["outputs/xlsx/", f"{len(list((BASE / 'outputs' / 'xlsx').glob('*.xlsx')))} converted Excel files"],
@@ -1709,7 +1736,7 @@ class ReportBuilder:
             f"Observed raw coverage: {raw_pts:,} unique timestamps with {raw_gaps:,} missing (coverage {rc.get('coverage_ratio', 0):.2%}); "
             "10-minute reindexing adds synthetic forward-filled rows, which are tracked and disclosed (Section 3.1)",
             "Automated leakage audit confirms no trained model uses target/future columns (0 flagged); sample trace TB02/24h provides end-to-end evidence",
-            f"System generates {self.n_csv} CSV output files ({self.model_joblibs} model artifacts) following the "
+            f"System generates {self.n_csv} CSV output files ({self.ml_models} ML models / {self.model_artifacts_total} artifacts) following the "
             "Section 15 output schema (column naming, forecast_quality labels, CI fields)",
             "Walk-forward validation (5 folds) confirms baseline stability",
             f"FastAPI serves {self.n_api_endpoints} endpoints with interactive web dashboard; API key authentication is fail-closed",
@@ -1773,10 +1800,12 @@ class ReportBuilder:
             ["P0-02", "Data period and sample counts inconsistent (01/2021-07/2026 vs 12/2026); 46,800 test rows "
              "did not match 21-month date range",
              "Raw union coverage audited before any reindexing: unique timestamps, duplicates, missing and "
-             "synthetic reindexed rows are computed and disclosed. Split statistics use observed timestamps "
-             "only. The 12/2026 tail is flagged as raw-file coverage, not as measured operational history; "
-             "the report states the test tail is an unvalidated forecast rehearsal.",
-             "raw_coverage_audit.json, split_statistics.json, reindex_additions.json, horizon_sample_counts.json, data_manifest.csv"],
+             "synthetic reindexed rows are computed and disclosed. The official evaluation window is now cut "
+             "at evaluation_cutoff = min(report_date, raw_union_end); rows at/after the cutoff are flagged "
+             "is_simulated=1 and excluded from all official metrics (their raw-file extent is still disclosed "
+             "as coverage, not measured history). Split statistics use observed timestamps only.",
+             "raw_coverage_audit.json, split_statistics.json, reindex_additions.json, evaluation_window.json, "
+             "horizon_sample_counts.json, data_manifest.csv"],
             ["P0-03", "Forecast Skill vs persistence missing (NaN / '-') in tables",
              "Persistence and Ridge are evaluated on the identical test samples per target x horizon; "
              "skill_vs_persistence and skill_vs_ridge are written per row with n_samples; mean +/- std "

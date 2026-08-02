@@ -43,6 +43,55 @@ def test_rated_power_for_target_farm_uses_26400():
     assert _rated_power_for_target("farm_total_power_target_24hour") == 26400
 
 
+def test_nmae_equals_mae_over_rated_power_percent():
+    """P0-03: nMAE must equal MAE/P_rated*100 per row — turbines at 2200 kW,
+    farm at 26400 kW — even when a farm target is iterated FIRST."""
+    from src.evaluate import compute_metrics, evaluate_all_models
+
+    actual = np.array([100.0, 200.0, 300.0])
+    predicted = np.array([110.0, 210.0, 290.0])
+    assert compute_metrics(actual, predicted, 2200)["mae"] == pytest.approx(10.0)
+    assert compute_metrics(actual, predicted, 2200)["nmae_pct"] == pytest.approx(10 / 2200 * 100)
+    assert compute_metrics(actual, predicted, 2200)["nrmse_pct"] == pytest.approx(10 / 2200 * 100)
+    assert compute_metrics(actual, predicted, 26400)["nmae_pct"] == pytest.approx(10 / 26400 * 100)
+
+    test_data = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=3, freq="10min"),
+        "TB01_power_target_10min": actual,
+        "farm_total_power_target_10min": actual,
+    })
+    predictions = {
+        "farm_total_power_target_10min_xgb": {
+            "model_name": "xgboost", "target": "farm_total_power_target_10min",
+            "predictions": predicted},
+        "TB01_power_target_10min_xgb": {
+            "model_name": "xgboost", "target": "TB01_power_target_10min",
+            "predictions": predicted},
+    }
+    config = {"forecasting": {"horizons": [{"name": "10min", "steps": 1}]}}
+    df = evaluate_all_models(test_data, predictions, config)
+    farm_row = df[df["target"] == "farm_total_power_target_10min"].iloc[0]
+    tb_row = df[df["target"] == "TB01_power_target_10min"].iloc[0]
+    assert farm_row["nmae_pct"] == pytest.approx(10 / 26400 * 100)
+    assert tb_row["nmae_pct"] == pytest.approx(10 / 2200 * 100)
+    assert tb_row["nrmse_pct"] == pytest.approx(10 / 2200 * 100)
+
+
+def test_evaluation_metrics_csv_consistent_with_rated_power():
+    """P0-03 (real data): every row of evaluation_metrics.csv satisfies
+    nMAE = MAE/P_rated*100 (2200 kW turbines, 26400 kW farm)."""
+    from src.evaluate import _rated_power_for_target
+
+    base = Path(__file__).parent.parent
+    df = pd.read_csv(base / "outputs" / "forecasts" / "evaluation_metrics.csv")
+    assert not df.empty
+    assert {"mae", "nmae_pct", "rmse", "nrmse_pct", "target"} <= set(df.columns)
+    for _, row in df.iterrows():
+        rp = _rated_power_for_target(str(row["target"]))
+        assert row["nmae_pct"] == pytest.approx(row["mae"] / rp * 100, rel=1e-6)
+        assert row["nrmse_pct"] == pytest.approx(row["rmse"] / rp * 100, rel=1e-6)
+
+
 def test_append_baseline_rows_adds_persistence_and_ridge():
     from src.evaluate import append_baseline_rows
 
@@ -110,6 +159,106 @@ def test_leakage_assertions_pass_on_clean_ridge():
     assert row["n_timestamp_mismatches_checked"] == 0
     assert row["assert_not_identical_to_target"]
     assert row["all_passed"]
+
+
+def test_preprocessing_sets_provenance_flags():
+    from src.preprocessing import preprocess_pipeline
+
+    ts = pd.date_range("2026-01-01 00:00", periods=8, freq="10min")
+    ts = ts.delete([2, 3])  # create a 20-min gap at indices 2-3
+    df = pd.DataFrame({
+        "timestamp": ts,
+        "TB01_power": [100.0, 200.0, 500.0, 600.0, 700.0, 800.0],
+    })
+    config = {"data": {"sampling_interval_minutes": 10}}
+    out = preprocess_pipeline(df, config, evaluation_cutoff=pd.Timestamp("2026-01-01 00:40"))
+
+    assert "is_observed" in out.columns
+    assert "is_synthetic" in out.columns
+    assert "is_imputed" in out.columns
+    assert "is_simulated" in out.columns
+
+    # The two missing 10-min slots were inserted by reindexing -> synthetic, not observed.
+    assert int(out["is_synthetic"].sum()) == 2
+    assert int(out["is_observed"].sum()) == 6
+    # ffill fills the gap -> those synthetic rows are also imputed.
+    assert int(out["is_imputed"].sum()) >= 2
+
+    # Rows at/after the cutoff are simulated.
+    assert int(out["is_simulated"].sum()) == 4
+    assert set(out.loc[out["is_simulated"] == 1, "timestamp"]).issubset(
+        set(out.loc[out["timestamp"] >= "2026-01-01 00:40", "timestamp"]))
+
+    # A row that is a genuine raw reading must never be flagged synthetic.
+    raw_row = out.loc[out["TB01_power"] == 100.0].iloc[0]
+    assert raw_row["is_observed"] == 1 and raw_row["is_synthetic"] == 0
+
+
+def test_preprocessing_without_cutoff_has_no_simulated():
+    from src.preprocessing import preprocess_pipeline
+
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=5, freq="10min"),
+        "TB01_power": np.arange(5, dtype=float),
+    })
+    out = preprocess_pipeline(df, {"data": {"sampling_interval_minutes": 10}})
+    assert "is_simulated" in out.columns
+    assert int(out["is_simulated"].sum()) == 0
+
+
+def test_provenance_columns_excluded_from_ridge_features():
+    from src.train_baseline import is_feature_column, select_feature_columns
+
+    for col in ["is_observed", "is_synthetic", "is_imputed", "is_simulated"]:
+        assert not is_feature_column(col, "TB01_power_target_10min", np.dtype("int64"))
+
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=5, freq="10min"),
+        "TB01_power": np.arange(5.0),
+        "is_simulated": np.zeros(5, dtype=int),
+        "TB01_power_target_10min": np.arange(5.0),
+    })
+    cols = select_feature_columns(df, "TB01_power_target_10min")
+    assert "is_simulated" not in cols
+    assert "TB01_power" in cols
+
+
+def test_provenance_columns_excluded_from_ml_features():
+    from src.train_power_model import prepare_features
+
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=10, freq="10min"),
+        "TB01_power": np.arange(10.0),
+        "is_observed": np.ones(10, dtype=int),
+        "is_simulated": np.zeros(10, dtype=int),
+        "TB01_power_target_10min": np.arange(10.0) + 1.0,
+    })
+    X, y, cols = prepare_features(df, "TB01_power_target_10min")
+    assert "is_observed" not in cols
+    assert "is_simulated" not in cols
+    assert "TB01_power" in cols
+
+
+def test_official_test_window_truncates_simulated(tmp_path, monkeypatch):
+    import generate_outputs as go
+
+    full = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=6, freq="10min"),
+        "is_simulated": [0, 0, 0, 0, 1, 1],
+    })
+    out = go._official_test_window(full)
+    assert len(out) == 4
+    assert (out["is_simulated"] == 0).all()
+
+    # Fallback path without the is_simulated column uses config report_date.
+    no_flag = pd.DataFrame({
+        "timestamp": pd.date_range("2026-07-01", periods=6, freq="D"),
+        "TB01_power": np.arange(6.0),
+    })
+    monkeypatch.setattr(go, "load_config",
+                        lambda: {"data": {"report_date": "2026-07-03"}})
+    out2 = go._official_test_window(no_flag)
+    assert out2["timestamp"].max() < pd.Timestamp("2026-07-03")
 
 
 def test_generate_change_log_produces_valid_docx(tmp_path):
@@ -258,3 +407,26 @@ def test_farm_horizon_window_check_uses_identical_samples():
     assert row["n_common_samples"] == n - 24
     assert pd.notna(row["r2_a_on_common"])
     assert pd.notna(row["r2_b_on_common"])
+
+
+def test_report_model_counts_come_from_model_joblibs_not_cross_product():
+    """P0-02: report counts read inventory (130 ML models), never the
+    eval-table cross-product (65 targets x 4 models x 5 horizons = 1300)."""
+    import json
+    from pathlib import Path
+
+    base = Path(__file__).parent.parent
+    inv = json.load(open(base / "data" / "metadata" / "inventory_summary.json"))
+    m = inv["counts"]["models"]
+    assert m["ml_models"] == 130
+    assert m["ml_models_complete"] == 130
+    assert m["total_artifacts"] == 520
+    assert m["baseline_evaluations"] == 10
+
+    import generate_report
+    b = generate_report.ReportBuilder()
+    assert b.ml_models == 130
+    assert b.model_count == 130
+    assert b.model_artifacts_total == 520
+    assert b.baseline_evaluations == 10
+    assert "1300" not in f"{b.ml_models} {b.model_artifacts_total} {b.baseline_evaluations}"

@@ -62,3 +62,30 @@ def test_count_api_endpoints_returns_stable_schema():
     got = inventory._count_api_endpoints(BASE_DIR)
     assert set(got.keys()) == {"GET", "POST", "PUT", "DELETE", "total"}
     assert all(isinstance(v, int) for v in got.values())
+
+
+def test_count_models_counts_model_joblib_files():
+    """P0-02: ml_models == number of *_model.joblib files (never a cross-product)."""
+    models_dir = BASE_DIR / "models"
+    got = inventory._count_models(BASE_DIR)
+    assert got["ml_models"] == len(list(models_dir.glob("*_model.joblib")))
+    assert got["ml_models"] == 130  # 13 targets x 2 algorithms x 5 horizons
+
+
+def test_count_models_separates_artifacts_from_models():
+    got = inventory._count_models(BASE_DIR)
+    assert got["ml_models_complete"] == got["ml_models"]
+    assert got["total_artifacts"] == got["ml_models"] * 4
+    assert got["total_joblib_files"] == got["ml_models"] * 2  # model + scaler per key
+
+
+def test_count_models_per_type_sums_to_ml_models():
+    got = inventory._count_models(BASE_DIR)
+    assert sum(got["per_model_type"].values()) == got["ml_models"]
+    assert set(got["per_model_type"]) <= {"lightgbm", "xgboost", "other"}
+    assert got["per_model_type"]["lightgbm"] == got["per_model_type"]["xgboost"]
+
+
+def test_count_models_baseline_evaluations_are_separate():
+    got = inventory._count_models(BASE_DIR)
+    assert got["baseline_evaluations"] >= 10  # persistence + ridge x 5 horizons

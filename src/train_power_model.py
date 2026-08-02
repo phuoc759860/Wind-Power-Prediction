@@ -28,7 +28,8 @@ def prepare_features(df: pd.DataFrame, target_col: str, feature_cols: List[str] 
     df = df.copy()
 
     if exclude_patterns is None:
-        exclude_patterns = ["_missing", "_status", "data_split", "time_index"]
+        exclude_patterns = ["_missing", "_status", "data_split", "time_index",
+                            "is_observed", "is_synthetic", "is_imputed", "is_simulated"]
 
     if feature_cols is None:
         feature_cols = []

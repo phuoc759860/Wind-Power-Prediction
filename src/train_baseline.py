@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 # value P(t+h); any model that consumes them is leaking the answer.
 NON_FEATURE_MARKERS = ["_target_", "_missing", "_status", "_is_anomaly",
                        "_anomaly_score", "_is_stopped", "_failure_event"]
-META_COLUMNS = ["timestamp", "PCTimeStamp", "data_split", "time_index", "data_audit"]
+META_COLUMNS = ["timestamp", "PCTimeStamp", "data_split", "time_index", "data_audit",
+                "is_observed", "is_synthetic", "is_imputed", "is_simulated"]
 
 
 def base_power_col(target_col: str) -> str:

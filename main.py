@@ -116,6 +116,24 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     except Exception as e:
         logger.warning(f"Raw manifest/coverage audit failed: {e}")
 
+    # P0-01: official evaluation window. Cut at min(report_date, raw_union_end).
+    # Any row at/after this cutoff is flagged is_simulated=1 in preprocessing
+    # and excluded from the official evaluation window below.
+    report_date = config.get("data", {}).get("report_date")
+    evaluation_cutoff = None
+    if report_date:
+        cutoff = pd.Timestamp(report_date)
+        raw_end = None
+        if raw_ts is not None and len(raw_ts) > 0:
+            raw_end = pd.Timestamp(raw_ts.max())
+            if raw_end < cutoff:
+                cutoff = raw_end
+        evaluation_cutoff = cutoff
+        logger.info(f"P0-01 evaluation cutoff = min(report_date={report_date}, "
+                    f"raw_union_end={raw_end if raw_ts is not None else 'N/A'}) = {evaluation_cutoff}")
+    else:
+        logger.warning("No data.report_date in config; evaluation window not cut (P0-01)")
+
     # ============================================================
     # STEP 2: Column Mapping
     # ============================================================
@@ -181,7 +199,7 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     logger.info("STEP 4: PREPROCESSING")
     logger.info("=" * 60)
 
-    processed_data = preprocess_pipeline(mapped_data, config)
+    processed_data = preprocess_pipeline(mapped_data, config, evaluation_cutoff=evaluation_cutoff)
     save_processed_data(processed_data, str(base_dir / "data" / "processed"))
 
     # ============================================================
@@ -213,6 +231,18 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         test_ratio=split_cfg.get("test_ratio", 0.15),
     )
 
+    # P0-01: truncate the OFFICIAL test/evaluation window at the report cutoff.
+    # Rows at/after the cutoff (the raw source extends beyond the report date)
+    # are simulated / beyond-report and must not back official claims.
+    simulated_test_df = pd.DataFrame()
+    test_window_full = (str(test_df["timestamp"].min()), str(test_df["timestamp"].max()))
+    if evaluation_cutoff is not None:
+        simulated_test_df = test_df[test_df["timestamp"] >= evaluation_cutoff].copy()
+        test_df = test_df[test_df["timestamp"] < evaluation_cutoff].copy()
+        logger.info(f"P0-01 official test window cut at {evaluation_cutoff}: "
+                    f"kept {len(test_df)} rows, excluded {len(simulated_test_df)} "
+                    f"simulated/beyond-report rows")
+
     split_stats = get_split_statistics(train_df, val_df, test_df, interval_minutes=10)
     logger.info("Split statistics (detailed):")
     for split_name, s in split_stats.items():
@@ -224,6 +254,25 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     with open(base_dir / "data" / "metadata" / "split_statistics.json", "w") as f:
         json.dump(split_stats, f, indent=2, default=str)
     logger.info("  Split statistics saved to data/metadata/split_statistics.json")
+
+    # P0-01 evidence: evaluation window definition + what was excluded.
+    eval_window = {
+        "policy": "evaluation_cutoff = min(data.report_date, raw_union_end); "
+                  "rows >= cutoff are flagged is_simulated=1 and excluded from official evaluation",
+        "report_date": str(report_date) if report_date else None,
+        "raw_union_end": str(pd.Timestamp(raw_ts.max())) if raw_ts is not None and len(raw_ts) else None,
+        "evaluation_cutoff": str(evaluation_cutoff) if evaluation_cutoff is not None else None,
+        "test_window_full_start": test_window_full[0],
+        "test_window_full_end": test_window_full[1],
+        "test_window_official_start": str(test_df["timestamp"].min()),
+        "test_window_official_end": str(test_df["timestamp"].max()),
+        "n_test_rows_full": int(len(test_df) + len(simulated_test_df)),
+        "n_test_rows_excluded_simulated": int(len(simulated_test_df)),
+        "n_test_rows_official": int(len(test_df)),
+    }
+    with open(base_dir / "data" / "metadata" / "evaluation_window.json", "w") as f:
+        json.dump(eval_window, f, indent=2, default=str)
+    logger.info(f"  evaluation_window.json saved (official test window ends {eval_window['test_window_official_end']})")
 
     # Honest per-horizon valid-sample counts (rows whose target P(t+h) exists).
     h_samples = horizon_sample_counts(train_df, val_df, test_df, config)
@@ -639,8 +688,10 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     logger.info("-" * 50)
     logger.info("AUDIT FACTS FOR REPORT (version 2.1.0):")
     if raw_ts is not None:
-        logger.info(f"  Raw union end: {raw_ts.max()}  (report reference date: 2026-07-30)")
-    logger.info(f"  Test split end: {test_df['timestamp'].max()}")
+        logger.info(f"  Raw union end: {raw_ts.max()}  (report reference date: {report_date or 'N/A'})")
+    if evaluation_cutoff is not None:
+        logger.info(f"  Official evaluation cutoff: {evaluation_cutoff} (test window ends at this)")
+    logger.info(f"  Test split end (official): {test_df['timestamp'].max()}")
     if coverage is not None:
         logger.info(f"  Raw union missing timestamps: {coverage['overall']['n_missing_timestamps']} "
                     f"({(1 - coverage['overall']['coverage_ratio'])*100:.2f}%)")

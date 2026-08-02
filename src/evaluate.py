@@ -110,15 +110,17 @@ def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict,
 
         valid = ~(np.isnan(actual) | np.isnan(pred_values))
 
-        rated_power = _rated_power_for_target(target, rated_power)
+        # P0-03: never reassign the parameter — a farm target would clobber the
+        # rated power to 26400 for every later turbine row in this loop.
+        rp = _rated_power_for_target(target, rated_power)
 
         # Segment decomposition (reviewer P0-03): near-rated plateau and near-zero
-        cap_mask = (actual >= rated_power * 0.95) & valid
-        zero_mask = (actual <= rated_power * 0.01) & valid
+        cap_mask = (actual >= rp * 0.95) & valid
+        zero_mask = (actual <= rp * 0.01) & valid
         seg_mask = cap_mask | zero_mask
 
-        metrics = compute_metrics(actual, pred_values, rated_power)
-        metrics_excl = compute_metrics(actual, pred_values, rated_power, exclude_mask=seg_mask)
+        metrics = compute_metrics(actual, pred_values, rp)
+        metrics_excl = compute_metrics(actual, pred_values, rp, exclude_mask=seg_mask)
 
         horizon = "unknown"
         for h in config.get("forecasting", {}).get("horizons", []):
@@ -210,10 +212,10 @@ def append_baseline_rows(results_df: pd.DataFrame, test_data: pd.DataFrame,
             valid = ~(np.isnan(actual) | np.isnan(preds))
             if valid.sum() == 0:
                 continue
-            rated_power = _rated_power_for_target(target, rated_power)
-            m = compute_metrics(actual, preds, rated_power)
-            cap_mask = (actual >= rated_power * 0.95) & valid
-            zero_mask = (actual <= rated_power * 0.01) & valid
+            rp = _rated_power_for_target(target, rated_power)
+            m = compute_metrics(actual, preds, rp)
+            cap_mask = (actual >= rp * 0.95) & valid
+            zero_mask = (actual <= rp * 0.01) & valid
 
             skill_other = np.nan
             if len(other) > 0:

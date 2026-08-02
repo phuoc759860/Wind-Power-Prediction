@@ -7,6 +7,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+def test_config_has_report_date():
+    import yaml
+    repo_root = Path(__file__).parent.parent
+    with open(repo_root / "configs" / "config.yaml", "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    report_date = config.get("data", {}).get("report_date")
+    assert report_date, "data.report_date must be set (P0-01 evaluation window)"
+    pd.Timestamp(report_date)  # must be parseable
+
+
 def test_split_statistics_schema():
     from src.split_time_series import get_split_statistics
 
