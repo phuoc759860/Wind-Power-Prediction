@@ -118,7 +118,7 @@ def _model_trainers(config: dict) -> Dict:
 
 
 def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
-                       target_col: str, config: dict) -> Tuple[Dict, Dict]:
+                       target_col: str, config: dict, tuning_sink: dict = None) -> Tuple[Dict, Dict]:
     logger.info(f"Training power models for: {target_col}")
 
     X_train, y_train, feature_cols = prepare_features(train_data, target_col)
@@ -139,6 +139,9 @@ def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
     trained_models = {}
 
     trainers = _model_trainers(config)
+    tuning_enabled = bool(config.get("training", {}).get("tuning", {}).get("enabled", False))
+    collector = tuning_sink.get("records") if (tuning_sink and tuning_enabled) else None
+    best_sink = tuning_sink.get("best_params") if (tuning_sink and tuning_enabled) else None
 
     for model_name in ml_models:
         if model_name not in trainers:
@@ -148,8 +151,13 @@ def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
         logger.info(f"  Training {model_name}...")
         try:
             trainer = trainers[model_name]
-            model = trainer(X_train_s, y_train.values, config,
-                            X_val=X_val_s, y_val=y_val.values, feature_cols=feature_cols)
+            if collector is not None and model_name in ("xgboost", "lightgbm"):
+                model = trainer(X_train_s, y_train.values, config,
+                                X_val=X_val_s, y_val=y_val.values, feature_cols=feature_cols,
+                                target=target_col, collector=collector, best_sink=best_sink)
+            else:
+                model = trainer(X_train_s, y_train.values, config,
+                                X_val=X_val_s, y_val=y_val.values, feature_cols=feature_cols)
 
             if model is None:
                 continue
@@ -204,7 +212,8 @@ def train_power_models(train_data: pd.DataFrame, val_data: pd.DataFrame,
     return results, trained_models
 
 
-def _tune_xgboost(X_train, y_train, config, X_val=None, y_val=None, feature_cols=None):
+def _tune_xgboost(X_train, y_train, config, X_val=None, y_val=None, feature_cols=None,
+                  target=None, collector=None, best_sink=None):
     from sklearn.model_selection import TimeSeriesSplit
     import xgboost as xgb
 
@@ -224,22 +233,46 @@ def _tune_xgboost(X_train, y_train, config, X_val=None, y_val=None, feature_cols
 
     best_score = float("inf")
     best_params = None
+    records = []
     for n_est in param_grid["n_estimators"]:
         for md in param_grid["max_depth"][:2]:
             for lr in param_grid["learning_rate"][:2]:
                 params = {**base_params, "n_estimators": n_est, "max_depth": md, "learning_rate": lr}
                 scores = []
-                for train_idx, val_idx in tscv.split(X_train):
+                for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train)):
                     X_tr_fold, X_val_fold = X_train[train_idx], X_train[val_idx]
                     y_tr_fold, y_val_fold = y_train[train_idx], y_train[val_idx]
                     model = xgb.XGBRegressor(**params)
                     model.fit(X_tr_fold, y_tr_fold)
                     pred = model.predict(X_val_fold)
-                    scores.append(np.sqrt(np.mean((y_val_fold - pred) ** 2)))
+                    fold_rmse = np.sqrt(np.mean((y_val_fold - pred) ** 2))
+                    scores.append(fold_rmse)
+                    if collector is not None:
+                        records.append({
+                            "algorithm": "xgboost", "target": target,
+                            "n_estimators": n_est, "max_depth": md, "learning_rate": lr,
+                            "fold": fold, "cv_rmse": round(float(fold_rmse), 4),
+                        })
                 mean_rmse = np.mean(scores)
+                if collector is not None:
+                    records.append({
+                        "algorithm": "xgboost", "target": target,
+                        "n_estimators": n_est, "max_depth": md, "learning_rate": lr,
+                        "fold": "mean", "cv_rmse": round(float(mean_rmse), 4),
+                    })
                 if mean_rmse < best_score:
                     best_score = mean_rmse
                     best_params = params
+
+    if collector is not None:
+        collector.extend(records)
+    if best_sink is not None and target is not None:
+        best_sink[target] = {
+            "algorithm": "xgboost",
+            "params": {k: (int(v) if isinstance(v, (int, np.integer)) else float(v))
+                       for k, v in best_params.items()},
+            "mean_cv_rmse": round(float(best_score), 4),
+        }
 
     final_X = np.vstack([X_train, X_val]) if X_val is not None else X_train
     final_y = np.concatenate([y_train, y_val]) if y_val is not None else y_train
@@ -250,7 +283,8 @@ def _tune_xgboost(X_train, y_train, config, X_val=None, y_val=None, feature_cols
     return model
 
 
-def _tune_lightgbm(X_train, y_train, config, X_val=None, y_val=None, feature_cols=None):
+def _tune_lightgbm(X_train, y_train, config, X_val=None, y_val=None, feature_cols=None,
+                   target=None, collector=None, best_sink=None):
     from sklearn.model_selection import TimeSeriesSplit
     import lightgbm as lgb
 
@@ -271,22 +305,46 @@ def _tune_lightgbm(X_train, y_train, config, X_val=None, y_val=None, feature_col
 
     best_score = float("inf")
     best_params = None
+    records = []
     for n_est in param_grid["n_estimators"]:
         for md in param_grid["max_depth"][:2]:
             for lr in param_grid["learning_rate"][:2]:
                 params = {**base_params, "n_estimators": n_est, "max_depth": md, "learning_rate": lr}
                 scores = []
-                for train_idx, val_idx in tscv.split(X_train):
+                for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train)):
                     X_tr_fold, X_val_fold = X_train[train_idx], X_train[val_idx]
                     y_tr_fold, y_val_fold = y_train[train_idx], y_train[val_idx]
                     model = lgb.LGBMRegressor(**params)
                     model.fit(X_tr_fold, y_tr_fold)
                     pred = model.predict(X_val_fold)
-                    scores.append(np.sqrt(np.mean((y_val_fold - pred) ** 2)))
+                    fold_rmse = np.sqrt(np.mean((y_val_fold - pred) ** 2))
+                    scores.append(fold_rmse)
+                    if collector is not None:
+                        records.append({
+                            "algorithm": "lightgbm", "target": target,
+                            "n_estimators": n_est, "max_depth": md, "learning_rate": lr,
+                            "fold": fold, "cv_rmse": round(float(fold_rmse), 4),
+                        })
                 mean_rmse = np.mean(scores)
+                if collector is not None:
+                    records.append({
+                        "algorithm": "lightgbm", "target": target,
+                        "n_estimators": n_est, "max_depth": md, "learning_rate": lr,
+                        "fold": "mean", "cv_rmse": round(float(mean_rmse), 4),
+                    })
                 if mean_rmse < best_score:
                     best_score = mean_rmse
                     best_params = params
+
+    if collector is not None:
+        collector.extend(records)
+    if best_sink is not None and target is not None:
+        best_sink[target] = {
+            "algorithm": "lightgbm",
+            "params": {k: (int(v) if isinstance(v, (int, np.integer)) else float(v))
+                       for k, v in best_params.items()},
+            "mean_cv_rmse": round(float(best_score), 4),
+        }
 
     final_X = np.vstack([X_train, X_val]) if X_val is not None else X_train
     final_y = np.concatenate([y_train, y_val]) if y_val is not None else y_train
@@ -389,7 +447,8 @@ def walk_forward_all_ml(df: pd.DataFrame, config: dict, n_folds: int = 3,
     base_target_cols = [c for c in base_target_cols if c in df.columns]
     horizons = config.get("forecasting", {}).get("horizons", [])
 
-    logger.info(f"Walk-forward ML: {len(base_target_cols)} targets x {len(horizons)} horizons x {n_folds} folds")
+    logger.info(f"Walk-forward ML: {len(base_target_cols)} targets x {len(horizons)} horizons "
+                f"(requested {n_folds} folds; actual per-target fold counts reported per target)")
     all_results = []
     total_combos = len(base_target_cols) * len(horizons)
 
@@ -509,15 +568,20 @@ def load_models(model_dir: str) -> Dict:
             features = json.load(open(features_path)) if os.path.exists(features_path) else []
 
             # Saved keys are "<target>_<model_name>"; recover the actual target
-            # column so loaded models behave like the in-memory trained ones.
+            # column and algorithm name so loaded models behave like the
+            # in-memory trained ones (predict_power then reports "lightgbm"
+            # instead of the full file key).
             target_col = model_key
+            model_name = None
             for suffix in ("_random_forest", "_xgboost", "_lightgbm"):
                 if model_key.endswith(suffix):
                     target_col = model_key[: -len(suffix)]
+                    model_name = suffix[1:]
                     break
 
             loaded[model_key] = {"model": model, "scaler": scaler,
-                                 "feature_cols": features, "target": target_col}
+                                 "feature_cols": features, "target": target_col,
+                                 "model_name": model_name}
 
     logger.info(f"Loaded {len(loaded)} models from {model_dir}")
     return loaded

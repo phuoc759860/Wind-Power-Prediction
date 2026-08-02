@@ -189,6 +189,14 @@ def preprocess_pipeline(df: pd.DataFrame, config: dict, evaluation_cutoff=None) 
     logger.info("Step 3: Enforcing sampling interval...")
     df = enforce_sampling_interval(df, interval)
 
+    # P0-05: provenance flags must be clean row-level truth immediately after the
+    # reindex, BEFORE any ffill. enforce_sampling_interval sets is_observed /
+    # is_synthetic (1 = timestamp present in the raw union). is_imputed is reset
+    # here so only values actually forward-filled in Step 5 are flagged.
+    df["is_observed"] = df["is_observed"].fillna(0).astype(int)
+    df["is_synthetic"] = df["is_synthetic"].fillna(0).astype(int)
+    df["is_imputed"] = 0
+
     logger.info("Step 4: Creating missing flags (before imputation)...")
     df = create_missing_flags(df)
 

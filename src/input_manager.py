@@ -34,9 +34,21 @@ def list_input_files(raw_dir: Optional[str] = None) -> List[dict]:
     if not raw_path.exists():
         return []
 
+    # Exclude auxiliary files that share the raw directory but are not SCADA
+    # sources (e.g. the NWP forecast CSV consumed by src/nwp.py). Without this,
+    # the NWP file would be unioned into the SCADA data and corrupt it.
+    excluded = set()
+    try:
+        nwp_path = str(load_config().get("nwp", {}).get("path", ""))
+        if nwp_path:
+            excluded.add(Path(nwp_path).name)
+    except Exception:
+        pass
+
     files = []
     for f in sorted(raw_path.iterdir()):
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+        if (f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+                and f.name not in excluded):
             stats = f.stat()
             size_mb = stats.st_size / (1024 * 1024)
             files.append({

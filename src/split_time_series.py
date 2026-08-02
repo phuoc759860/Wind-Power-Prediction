@@ -74,6 +74,20 @@ def get_split_statistics(train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFr
             stats[name]["avg_power"] = round(split[power_cols].mean().mean(), 2)
             stats[name]["total_energy_mwh"] = round(split[power_cols].mean().sum() * interval_minutes / 60000, 2)
 
+        # P0-05: rows must never be conflated with observed timestamps. After the
+        # 10-min reindex the split contains synthetic (reindexed) rows and rows
+        # whose values were forward-filled; report observed vs synthetic vs
+        # imputed per split so coverage claims use observed counts only.
+        if "is_observed" in split.columns:
+            is_obs = split["is_observed"].fillna(0).astype(int)
+            is_syn = split["is_synthetic"].fillna(0).astype(int) if "is_synthetic" in split.columns else (1 - is_obs)
+            is_imp = split["is_imputed"].fillna(0).astype(int) if "is_imputed" in split.columns else pd.Series(0, index=split.index)
+            stats[name]["n_observed_rows"] = int(is_obs.sum())
+            stats[name]["n_synthetic_rows"] = int(is_syn.sum())
+            stats[name]["n_imputed_rows"] = int(is_imp.sum())
+            stats[name]["n_observed_not_imputed_rows"] = int(((is_obs == 1) & (is_imp == 0)).sum())
+            stats[name]["observed_ratio"] = round(float(is_obs.mean()), 6) if len(split) else None
+
     return stats
 
 
@@ -157,5 +171,5 @@ def walk_forward_split(df: pd.DataFrame, n_folds: int = 5,
             }
         })
 
-    logger.info(f"Walk-forward validation: {len(folds)} folds")
+    logger.info(f"Walk-forward validation: {len(folds)} of {n_folds} requested folds produced")
     return folds

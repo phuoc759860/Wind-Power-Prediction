@@ -1,0 +1,13 @@
+{
+  "policy": "evaluation_cutoff = min(data.report_date, raw_union_end); rows >= cutoff are flagged is_simulated=1 and excluded from official evaluation",
+  "report_date": "2026-08-01",
+  "raw_union_end": "2026-12-07 23:50:00",
+  "evaluation_cutoff": "2026-08-01 00:00:00",
+  "test_window_full_start": "2026-01-16 22:40:00",
+  "test_window_full_end": "2026-12-07 23:50:00",
+  "test_window_official_start": "2026-01-16 22:40:00",
+  "test_window_official_end": "2026-07-31 23:50:00",
+  "n_test_rows_full": 46808,
+  "n_test_rows_excluded_simulated": 18576,
+  "n_test_rows_official": 28232
+}

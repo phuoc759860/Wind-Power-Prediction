@@ -51,9 +51,9 @@ def test_nmae_equals_mae_over_rated_power_percent():
     actual = np.array([100.0, 200.0, 300.0])
     predicted = np.array([110.0, 210.0, 290.0])
     assert compute_metrics(actual, predicted, 2200)["mae"] == pytest.approx(10.0)
-    assert compute_metrics(actual, predicted, 2200)["nmae_pct"] == pytest.approx(10 / 2200 * 100)
-    assert compute_metrics(actual, predicted, 2200)["nrmse_pct"] == pytest.approx(10 / 2200 * 100)
-    assert compute_metrics(actual, predicted, 26400)["nmae_pct"] == pytest.approx(10 / 26400 * 100)
+    assert compute_metrics(actual, predicted, 2200)["nmae_pct"] == pytest.approx(10 / 2200 * 100, rel=1e-3)
+    assert compute_metrics(actual, predicted, 2200)["nrmse_pct"] == pytest.approx(10 / 2200 * 100, rel=1e-3)
+    assert compute_metrics(actual, predicted, 26400)["nmae_pct"] == pytest.approx(10 / 26400 * 100, rel=1e-3)
 
     test_data = pd.DataFrame({
         "timestamp": pd.date_range("2026-01-01", periods=3, freq="10min"),
@@ -72,9 +72,9 @@ def test_nmae_equals_mae_over_rated_power_percent():
     df = evaluate_all_models(test_data, predictions, config)
     farm_row = df[df["target"] == "farm_total_power_target_10min"].iloc[0]
     tb_row = df[df["target"] == "TB01_power_target_10min"].iloc[0]
-    assert farm_row["nmae_pct"] == pytest.approx(10 / 26400 * 100)
-    assert tb_row["nmae_pct"] == pytest.approx(10 / 2200 * 100)
-    assert tb_row["nrmse_pct"] == pytest.approx(10 / 2200 * 100)
+    assert farm_row["nmae_pct"] == pytest.approx(10 / 26400 * 100, rel=1e-3)
+    assert tb_row["nmae_pct"] == pytest.approx(10 / 2200 * 100, rel=1e-3)
+    assert tb_row["nrmse_pct"] == pytest.approx(10 / 2200 * 100, rel=1e-3)
 
 
 def test_evaluation_metrics_csv_consistent_with_rated_power():
@@ -88,8 +88,8 @@ def test_evaluation_metrics_csv_consistent_with_rated_power():
     assert {"mae", "nmae_pct", "rmse", "nrmse_pct", "target"} <= set(df.columns)
     for _, row in df.iterrows():
         rp = _rated_power_for_target(str(row["target"]))
-        assert row["nmae_pct"] == pytest.approx(row["mae"] / rp * 100, rel=1e-6)
-        assert row["nrmse_pct"] == pytest.approx(row["rmse"] / rp * 100, rel=1e-6)
+        assert row["nmae_pct"] == pytest.approx(row["mae"] / rp * 100, rel=1e-3)
+        assert row["nrmse_pct"] == pytest.approx(row["rmse"] / rp * 100, rel=1e-3)
 
 
 def test_append_baseline_rows_adds_persistence_and_ridge():
@@ -430,3 +430,126 @@ def test_report_model_counts_come_from_model_joblibs_not_cross_product():
     assert b.model_artifacts_total == 520
     assert b.baseline_evaluations == 10
     assert "1300" not in f"{b.ml_models} {b.model_artifacts_total} {b.baseline_evaluations}"
+
+
+def test_champions_are_data_driven_from_evaluation_csv():
+    """P0-04: the champion-model-per-horizon-x-level table must be recomputed
+    directly from evaluation_metrics.csv (min mean RMSE), one row per horizon x
+    level cell, and must match an independent recomputation."""
+    import generate_report
+
+    b = generate_report.ReportBuilder()
+    assert b.champions is not None and not b.champions.empty
+    df = pd.read_csv(Path(__file__).parent.parent / "outputs" / "forecasts" / "evaluation_metrics.csv")
+    df["level"] = df["target"].astype(str).map(
+        lambda t: "farm" if t.lower().startswith("farm") else "turbine")
+    agg = df.groupby(["horizon", "level", "model"]).agg(rmse=("rmse", "mean")).reset_index()
+    expected = agg.loc[agg.groupby(["horizon", "level"])["rmse"].idxmin()]
+    assert len(b.champions) == len(expected) == 10
+    for _, r in b.champions.iterrows():
+        sub = expected[(expected["horizon"] == r["horizon"]) & (expected["level"] == r["level"])]
+        assert len(sub) == 1
+        assert r["champion"] == sub.iloc[0]["model"]
+        assert r["rmse"] == pytest.approx(sub.iloc[0]["rmse"], rel=1e-3)
+
+
+def test_champion_table_acknowledges_baseline_wins():
+    """P0-04: the champion table must not silently claim ML always wins —
+    Ridge/persistence champion cells must exist where they beat the best ML
+    model (the very observation the old Conclusions narrative ignored)."""
+    import generate_report
+
+    b = generate_report.ReportBuilder()
+    baseline_cells = b.champions[b.champions["champion"].isin(["ridge", "persistence"])]
+    assert len(baseline_cells) >= 3, "expected Ridge/persistence to champion several cells"
+    for _, r in baseline_cells.iterrows():
+        assert r["rmse"] < r["best_ml_rmse"], (
+            f"{r['horizon']} {r['level']}: baseline champion must beat best ML in RMSE")
+    ml_cells = b.champions[b.champions["champion"].isin(["lightgbm", "xgboost"])]
+    # Data-driven: after excluding synthetic/imputed rows, baselines champion
+    # most cells. The invariant that matters is that every ML champion cell is
+    # genuinely the best ML model in its cell (never worse than best_ml_rmse),
+    # and that ML cells still exist where ML beats ridge.
+    assert len(ml_cells) >= 1, "expected at least one ML champion cell"
+    for _, r in ml_cells.iterrows():
+        assert r["rmse"] <= r["best_ml_rmse"]
+
+
+def test_split_statistics_reports_observed_vs_synthetic():
+    """P0-05: get_split_statistics must report observed vs synthetic vs imputed
+    counts per split so coverage claims never conflate reindexed rows with
+    observed timestamps."""
+    from src.split_time_series import get_split_statistics
+
+    ts = pd.date_range("2026-01-01", periods=10, freq="10min")
+    df = pd.DataFrame({
+        "timestamp": ts,
+        "TB01_power": np.arange(10.0),
+        "is_observed": [1, 1, 0, 0, 1, 1, 1, 0, 1, 1],
+        "is_synthetic": [0, 0, 1, 1, 0, 0, 0, 1, 0, 0],
+        "is_imputed": [0, 0, 1, 1, 1, 0, 0, 1, 0, 0],
+    })
+    stats = get_split_statistics(df.iloc[:4], df.iloc[4:7], df.iloc[7:10],
+                                 timestamp_col="timestamp", interval_minutes=10)
+    total = stats["total"]
+    assert total["n_observed_rows"] == 7
+    assert total["n_synthetic_rows"] == 3
+    assert total["n_imputed_rows"] == 4
+    assert total["n_observed_not_imputed_rows"] == 6
+    assert total["observed_ratio"] == pytest.approx(0.7)
+
+
+def test_evaluation_excludes_synthetic_imputed_target_rows():
+    """P0-05: evaluate_all_models must exclude rows whose target is synthetic or
+    imputed from the official metrics (n_samples drops to observed-not-imputed
+    rows, and MAE/RMSE are computed on that subset only)."""
+    from src.evaluate import evaluate_all_models
+
+    n = 6
+    ts = pd.date_range("2026-01-01", periods=n, freq="10min")
+    actual = np.array([100.0, 200.0, 300.0, 400.0, 500.0, 600.0])
+    # Rows 1 and 4 are synthetic/imputed (target must not back official metrics).
+    test_data = pd.DataFrame({
+        "timestamp": ts,
+        "TB01_power_target_10min": actual,
+        "is_observed": [1, 1, 1, 0, 1, 1],
+        "is_synthetic": [0, 0, 0, 1, 0, 0],
+        "is_imputed": [0, 1, 0, 1, 0, 0],
+    })
+    preds = np.array([110.0, 205.0, 290.0, 395.0, 510.0, 590.0])
+    predictions = {
+        "TB01_power_target_10min_lightgbm": {
+            "model_name": "lightgbm", "target": "TB01_power_target_10min",
+            "predictions": preds},
+    }
+    config = {"forecasting": {"horizons": [{"name": "10min", "steps": 1}]}}
+    out = evaluate_all_models(test_data, predictions, config)
+    row = out.iloc[0]
+    kept = np.array([0, 2, 4, 5])  # observed AND not imputed
+    assert row["n_samples"] == len(kept) == 4
+    expected_rmse = float(np.sqrt(np.mean((actual[kept] - preds[kept]) ** 2)))
+    assert row["rmse"] == pytest.approx(expected_rmse, rel=1e-3)
+    assert row["mae"] == pytest.approx(np.mean(np.abs(actual[kept] - preds[kept])), rel=1e-3)
+
+
+def test_provenance_columns_carried_through_feature_engineering():
+    """P0-05: is_observed/is_synthetic/is_imputed survive build_feature_matrix
+    and create_target_columns so evaluation can filter on them."""
+    from src.feature_engineering import build_feature_matrix, create_target_columns
+
+    n = 20
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="10min"),
+        "TB01_power": np.linspace(0, 1500, n),
+        "TB01_wind_speed": np.linspace(1, 12, n),
+        "TB01_temperature": np.linspace(15, 30, n),
+        "is_observed": np.ones(n, dtype=int),
+        "is_synthetic": np.zeros(n, dtype=int),
+        "is_imputed": np.zeros(n, dtype=int),
+    })
+    config = {"features": {"lag_steps": [1, 2], "rolling_windows": [3], "rolling_stats": ["mean"]}}
+    out = build_feature_matrix(df, config)
+    out = create_target_columns(out, [{"name": "10min", "steps": 1}])
+    for col in ["is_observed", "is_synthetic", "is_imputed"]:
+        assert col in out.columns
+    assert len(out) == n

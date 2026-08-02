@@ -37,6 +37,7 @@ from src.audit import (raw_file_manifest, raw_timestamp_union, timestamp_audit,
                        leakage_assertions, write_sample_traces, write_checksums,
                        timestamp_audit_csv)
 from src.inventory import generate_inventory
+from src.nwp import load_nwp, build_stub_nwp, run_nwp_ablation
 
 logging.basicConfig(
     level=logging.INFO,
@@ -251,6 +252,10 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
             logger.info(f"  {'':12s}  expected={s['expected_steps']}, unique={s['unique_timestamps']}, "
                         f"dups={s['n_duplicate_timestamps']}, missing={s['n_missing_timestamps']} "
                         f"(coverage {s['coverage_ratio']*100:.2f}%)")
+        if "n_observed_rows" in s:
+            logger.info(f"  {'':12s}  observed={s['n_observed_rows']}, synthetic={s['n_synthetic_rows']}, "
+                        f"imputed={s['n_imputed_rows']}, observed-not-imputed={s['n_observed_not_imputed_rows']} "
+                        f"(observed ratio {s.get('observed_ratio', 0)*100:.2f}%)")
     with open(base_dir / "data" / "metadata" / "split_statistics.json", "w") as f:
         json.dump(split_stats, f, indent=2, default=str)
     logger.info("  Split statistics saved to data/metadata/split_statistics.json")
@@ -366,6 +371,7 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
 
     all_ml_results = {}
     all_trained_models = {}
+    tuning_sink = {"records": [], "best_params": {}} if config.get("training", {}).get("tuning", {}).get("enabled", False) else None
 
     turbine_ids = config.get("turbines", {}).get("ids", [])
     base_target_cols = [f"{tid}_power" for tid in turbine_ids if f"{tid}_power" in train_df.columns]
@@ -384,11 +390,30 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
                 continue
 
             try:
-                results, models = train_power_models(train_df, val_df, target, config)
+                results, models = train_power_models(train_df, val_df, target, config,
+                                                     tuning_sink=tuning_sink)
                 all_ml_results.update(results)
                 all_trained_models.update(models)
             except Exception as e:
                 logger.error(f"Error training models for {target}: {e}")
+
+    # P1-02: persist tuning evidence when hyperparameter tuning actually runs.
+    if tuning_sink is not None:
+        try:
+            if tuning_sink["records"]:
+                pd.DataFrame(tuning_sink["records"]).to_csv(
+                    base_dir / "data" / "metadata" / "tuning_results.csv", index=False)
+            else:
+                pd.DataFrame(columns=["algorithm", "target", "n_estimators", "max_depth",
+                                      "learning_rate", "fold", "cv_rmse"]).to_csv(
+                    base_dir / "data" / "metadata" / "tuning_results.csv", index=False)
+            with open(base_dir / "data" / "metadata" / "best_params.json", "w") as f:
+                json.dump(tuning_sink["best_params"], f, indent=2, sort_keys=True)
+            logger.info(f"Tuning evidence written: tuning_results.csv "
+                        f"({len(tuning_sink['records'])} combos x folds), "
+                        f"best_params.json ({len(tuning_sink['best_params'])} targets)")
+        except Exception as e:
+            logger.error(f"Tuning persistence failed: {e}")
 
     if all_trained_models:
         seed = config.get("training", {}).get("random_state", 42)
@@ -481,7 +506,9 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
 
     try:
         traces = write_sample_traces(feature_data, ridge_models, all_trained_models, config,
-                                     cases=[("TB02", "10min"), ("TB02", "1hour"), ("TB02", "24hour")],
+                                     cases=[("TB02", "10min"), ("TB02", "1hour"), ("TB02", "24hour"),
+                                            ("TB01", "24hour"), ("TB05", "10min"), ("TB05", "24hour"),
+                                            ("TB12", "10min"), ("TB12", "24hour")],
                                      out_dir=str(base_dir / "outputs" / "forecasts"), limit=500)
         for p in traces:
             logger.info(f"Sample trace written: {p}")
@@ -489,6 +516,7 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         logger.warning(f"Additional sample traces failed: {e}")
 
     # P0-01 explicit assertion table (target not in X, alignment, not allclose).
+    # Extended to every ML family (XGBoost/LightGBM) and every turbine (P1-01).
     try:
         leak_assert = leakage_assertions(feature_data, ridge_models, config)
         leak_assert.to_csv(base_dir / "data" / "metadata" / "leakage_audit_ridge.csv", index=False)
@@ -498,6 +526,20 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
             raise RuntimeError(f"P0-01 assertion failed: {n_fail} (turbine, horizon) cases")
     except Exception as e:
         logger.error(f"Leakage assertions failed: {e}")
+        raise
+
+    try:
+        leak_full = leakage_assertions(feature_data, ridge_models, config,
+                                       ml_models=all_trained_models)
+        leak_full.to_csv(base_dir / "data" / "metadata" / "leakage_audit_full.csv", index=False)
+        n_fail_full = int((~leak_full["all_passed"]).sum())
+        n_ml_rows = int((leak_full["model"] != "ridge").sum()) if not leak_full.empty else 0
+        logger.info(f"Full leakage assertions (Ridge + ML): {len(leak_full)} cases "
+                    f"({n_ml_rows} ML rows, {n_fail_full} failed)")
+        if n_fail_full:
+            raise RuntimeError(f"P1-01 assertion failed: {n_fail_full} (turbine, horizon, model) cases")
+    except Exception as e:
+        logger.error(f"Full leakage assertions failed: {e}")
         raise
 
     # Farm-level metrics (directly on summed farm power, not avg of turbine R²)
@@ -538,6 +580,32 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
                                 f"R2_24h={row['r2_b_on_common']} (delta={row['r2_b_minus_a_on_common']})")
     except Exception as e:
         logger.warning(f"Farm horizon window check failed: {e}")
+
+    # P1-05: NWP ingestion interface + SCADA-only vs SCADA+NWP ablation.
+    # The shipped 6h/24h models are SCADA-only; this makes that explicit and
+    # demonstrates the NWP ingestion path (real CSV if provided, stub otherwise).
+    logger.info("\n" + "-" * 50)
+    logger.info("NWP INGESTION + SCADA-ONLY vs SCADA+NWP ABLATION (P1-05)")
+    logger.info("-" * 50)
+    try:
+        nwp_cfg = config.get("nwp", {})
+        nwp_path = nwp_cfg.get("path", str(base_dir / "data" / "raw" / "nwp_forecast.csv"))
+        stub_path = str(base_dir / "data" / "processed" / "nwp_stub_forecast.csv")
+        nwp = load_nwp(nwp_path)
+        nwp_source = "real_csv"
+        if nwp is None:
+            logger.info("  No NWP CSV provided; building deterministic STUB NWP "
+                        "(perfect-forecast upper bound) to exercise the ingestion path")
+            nwp = build_stub_nwp(feature_data, config, stub_path)
+            nwp_source = "stub_synthetic"
+        nwp_abl = run_nwp_ablation(train_df, val_df, test_df, config, nwp, nwp_source=nwp_source)
+        if not nwp_abl.empty:
+            nwp_abl.to_csv(base_dir / "outputs" / "forecasts" / "nwp_ablation.csv", index=False)
+            for _, row in nwp_abl.iterrows():
+                logger.info(f"  {row['feature_set']:15s} {row['target']} {row['horizon']:6s}: "
+                            f"R2={row['r2']:.4f} RMSE={row['rmse_kw']:.1f} kW")
+    except Exception as e:
+        logger.warning(f"NWP ablation failed: {e}")
 
     # TB12 specific analysis
     logger.info("\n" + "-" * 50)

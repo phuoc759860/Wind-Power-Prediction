@@ -36,6 +36,29 @@ BLACK = colors.black
 # Usable text width on A4 with 20 mm side margins (keeps every table/figure inside the margins)
 USABLE_WIDTH = 168 * mm
 
+HORIZON_ORDER = ["10min", "30min", "1hour", "6hour", "24hour"]
+MODEL_DISPLAY = {"lightgbm": "LightGBM", "xgboost": "XGBoost", "ridge": "Ridge", "persistence": "Persistence"}
+LEVEL_DISPLAY = {"turbine": "Turbine", "farm": "Farm"}
+
+# Unicode-capable font for paragraphs containing Vietnamese diacritics (P2 font fix).
+# Helvetica is Latin-1 only and would render 'Ngô Đăng Lưu' as black squares.
+_UNICODE_FONT_NAME = None
+try:
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    _font_candidates = [
+        Path("C:/Windows/Fonts/arial.ttf"),
+        Path("C:/Windows/Fonts/segoeui.ttf"),
+        Path("C:/Windows/Fonts/calibri.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ]
+    _font_path = next((p for p in _font_candidates if p.exists()), None)
+    if _font_path is not None:
+        pdfmetrics.registerFont(TTFont("UnicodeSans", str(_font_path)))
+        _UNICODE_FONT_NAME = "UnicodeSans"
+except Exception:
+    _UNICODE_FONT_NAME = None
+
 
 def get_styles():
     styles = getSampleStyleSheet()
@@ -98,6 +121,13 @@ def get_styles():
         fontSize=8, leading=10, textColor=GRAY,
         alignment=TA_CENTER,
     ))
+    if _UNICODE_FONT_NAME:
+        styles.add(ParagraphStyle(
+            "UnicodeText", parent=styles["Normal"],
+            fontName=_UNICODE_FONT_NAME,
+            fontSize=10, leading=14, alignment=TA_JUSTIFY,
+            spaceAfter=3 * mm,
+        ))
     styles.add(ParagraphStyle(
         "TableHeader", parent=styles["Normal"],
         fontSize=9, leading=11, textColor=WHITE,
@@ -230,6 +260,156 @@ class ReportBuilder:
         cap = Paragraph(f"Figure {self._fig_counter}: {caption}", self.styles["Caption"])
         return KeepTogether([Image(str(path), width=w, height=h, kind="proportional"), cap])
 
+    def _dq_turbine_stats(self):
+        """Per-turbine missing rates, farm rate and TB12 per-column rate from data_quality_report.csv."""
+        if self.dq_df.empty:
+            return None
+        stats = {}
+        tr = self.dq_df[self.dq_df["column"].str.startswith("TB") &
+                        self.dq_df["column"].str.contains("wind_speed")]
+        if not tr.empty:
+            stats["turbines"] = {}
+            for _, row in tr.iterrows():
+                tb = row["column"].replace("_wind_speed", "")
+                try:
+                    stats["turbines"][tb] = {"rate": float(row["missing_rate_pct"]),
+                                             "remarks": str(row["remarks"])}
+                except (ValueError, TypeError):
+                    continue
+        farm = self.dq_df[self.dq_df["column"] == "farm_total_power"]
+        if not farm.empty:
+            try:
+                stats["farm_rate"] = float(farm["missing_rate_pct"].iloc[0])
+            except (ValueError, TypeError):
+                stats["farm_rate"] = None
+        tb12 = self.dq_df[self.dq_df["column"] == "TB12_power"]
+        if not tb12.empty:
+            try:
+                stats["tb12_overall"] = float(tb12["missing_rate_pct"].iloc[0])
+            except (ValueError, TypeError):
+                stats["tb12_overall"] = None
+        return stats
+
+    def _data_quality_intro(self):
+        """Section 3.2 lead-in built from data_quality_report.csv (never inline numbers)."""
+        st = self._dq_turbine_stats()
+        if not st or not st.get("turbines"):
+            return "Data quality was assessed by computing missing rates per column."
+        turbines = st["turbines"]
+        tb05 = turbines.get("TB05")
+        others = {k: v for k, v in turbines.items() if k != "TB05"}
+        if not others or tb05 is None:
+            return "Data quality was assessed by computing missing rates per column."
+        lo_tb = min(others, key=lambda k: others[k]["rate"])
+        hi_tb = max(others, key=lambda k: others[k]["rate"])
+        text = (f"Data quality was assessed by computing missing rates per column. Most turbines show "
+                f"{others[lo_tb]['rate']:.1f}-{others[hi_tb]['rate']:.1f}% missing data "
+                f"(classified as '{others[lo_tb]['remarks']}'), while TB05 has the highest turbine missing "
+                f"rate at {tb05['rate']:.2f}% (classified as '{tb05['remarks']}').")
+        if st.get("farm_rate") is not None:
+            text += (f" The farm-level aggregate power column has {st['farm_rate']:.1f}% missing data; "
+                     f"farm-total results below are therefore based on the observed aggregate series, and "
+                     f"a missing value in the aggregate is not interpreted as a reliability statement.")
+        return text
+
+    def _tb12_intro(self):
+        """Section 5.5 TB12 lead-in built from tb12_analysis.json (never inline numbers)."""
+        if not self.tb12:
+            return ""
+        missing = self.tb12.get("missing_rate")
+        stopped = self.tb12.get("stopped_rate")
+        frozen = self.tb12.get("frozen_data_ratio")
+        blocks = self.tb12.get("frozen_data_blocks")
+        ws_corr = self.tb12.get("wind_speed_corr_with_power")
+        parts = ["Turbine TB12 shows significantly lower forecast accuracy compared to other turbines."]
+        if missing is not None and stopped is not None and frozen is not None and blocks is not None:
+            test_n = (self.tb12.get("per_split", {}) or {}).get("test", {}).get("n_rows")
+            window = f" In the official test window ({test_n:,} rows) it has {missing}% missing data, " \
+                     f"{stopped}% stopped/near-zero power output, and a {frozen}% frozen-data ratio " \
+                     f"({blocks} blocks)."
+            parts.append(window)
+        st = self._dq_turbine_stats()
+        if st and st.get("tb12_overall") is not None:
+            parts.append(f" Across the full processed dataset TB12_power is {st['tb12_overall']:.2f}% missing "
+                         f"after forward-fill (per-column, Section 3.2); the test-window rate reflects the "
+                         f"evaluation period only.")
+        if ws_corr is not None:
+            parts.append(f" Its wind-power correlation within the official window is {ws_corr}.")
+        parts.append(" These data-quality issues warrant investigation into sensor calibration and operating "
+                     "conditions.")
+        return " ".join(parts)
+
+    def _wf_fold_count(self):
+        """Actual number of walk-forward folds, read from walk_forward_summary.json
+        (never the requested n_folds)."""
+        if not self.walk_forward:
+            return None
+        counts = set()
+        for v in self.walk_forward.values():
+            n = v.get("n_folds")
+            if isinstance(n, (int, float)) and n > 0:
+                counts.add(int(n))
+        return max(counts) if counts else None
+
+    def _wf_max_std(self):
+        """Max rmse_std and r2_std across walk-forward summary keys, with their horizons."""
+        if not self.walk_forward:
+            return None
+        max_rmse = (0.0, "")
+        max_r2 = (0.0, "")
+        for v in self.walk_forward.values():
+            h = v.get("horizon", "")
+            rs = v.get("rmse_std")
+            r2s = v.get("r2_std")
+            if rs is not None and float(rs) > max_rmse[0]:
+                max_rmse = (float(rs), h)
+            if r2s is not None and float(r2s) > max_r2[0]:
+                max_r2 = (float(r2s), h)
+        return {"max_rmse_std": max_rmse[0], "max_rmse_horizon": max_rmse[1],
+                "max_r2_std": max_r2[0], "max_r2_horizon": max_r2[1]}
+
+    def _turbine_parity_gap(self):
+        """Max |ΔR2| between LightGBM and XGBoost on mean turbine R2 (metrics.csv,
+        turbine rows only, never the 'farm' row)."""
+        if self.metrics_df.empty or "R2" not in self.metrics_df.columns:
+            return None
+        t = self.metrics_df[self.metrics_df["turbine_id"] != "farm"]
+        if t.empty:
+            return None
+        agg = t.groupby(["horizon", "model"])["R2"].mean()
+        try:
+            lgb = agg.xs("lightgbm", level=1)
+            xgb = agg.xs("xgboost", level=1)
+        except KeyError:
+            return None
+        common = lgb.index.intersection(xgb.index)
+        if not len(common):
+            return None
+        return float((lgb[common] - xgb[common]).abs().max())
+
+    def _farm_parity_gap(self):
+        """Max |ΔR2| between LightGBM and XGBoost on farm-total R2 (farm_metrics.csv)."""
+        if self.farm_metrics_df.empty or "r2" not in self.farm_metrics_df.columns:
+            return None
+        f = self.farm_metrics_df[["horizon", "model", "r2"]].dropna()
+        if f.empty:
+            return None
+        piv = f.pivot(index="horizon", columns="model", values="r2")
+        if not {"lightgbm", "xgboost"}.issubset(piv.columns):
+            return None
+        return float((piv["xgboost"] - piv["lightgbm"]).abs().max())
+
+    def _farm_champions(self):
+        """Champion (min mean RMSE) per horizon from farm_metrics.csv."""
+        if self.farm_metrics_df.empty or "rmse" not in self.farm_metrics_df.columns:
+            return []
+        f = self.farm_metrics_df[["horizon", "model", "rmse", "r2"]].dropna(subset=["rmse"])
+        if f.empty:
+            return []
+        best = f.loc[f.groupby("horizon")["rmse"].idxmin()]
+        return [(r["horizon"], r["model"], float(r["rmse"]), float(r["r2"]))
+                for _, r in best.iterrows()]
+
     def _load_data(self):
         self.eval_df = pd.read_csv(CSV_DIR / "evaluation_metrics.csv") if (CSV_DIR / "evaluation_metrics.csv").exists() else pd.DataFrame()
         self.metrics_df = pd.read_csv(CSV_DIR / "metrics.csv") if (CSV_DIR / "metrics.csv").exists() else pd.DataFrame()
@@ -254,6 +434,9 @@ class ReportBuilder:
         leak_path = META_DIR / "leakage_audit.csv"
         self.leakage_audit_exists = leak_path.exists()
         self.leakage_df = pd.read_csv(leak_path) if self.leakage_audit_exists else pd.DataFrame()
+        leak_full_path = META_DIR / "leakage_audit_full.csv"
+        self.leakage_full_exists = leak_full_path.exists()
+        self.leakage_full_df = pd.read_csv(leak_full_path) if self.leakage_full_exists else pd.DataFrame()
         hs_path = META_DIR / "horizon_sample_counts.json"
         self.horizon_samples = json.load(open(hs_path)) if hs_path.exists() else {}
         split_path = META_DIR / "split_statistics.json"
@@ -274,6 +457,19 @@ class ReportBuilder:
         self.csv_files = sorted(CSV_DIR.glob("*.csv"))
         self.n_csv = len(self.csv_files)
         self.model_joblibs = len(list((BASE / "models").glob("*.joblib")))
+        # P2: record the git commit the report was built from, so the report date
+        # and the code revision are reproducible from the repository itself.
+        self.git_commit = None
+        try:
+            import subprocess
+            out = subprocess.run(
+                ["git", "-C", str(BASE), "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                self.git_commit = out.stdout.strip()
+        except Exception:
+            self.git_commit = None
         inv_counts = self.inventory.get("counts", {}) if self.inventory else {}
         inv_models = inv_counts.get("models", {}) if isinstance(inv_counts, dict) else {}
         self.ml_models = int(inv_models.get("ml_models", 0) or 0) or len(list((BASE / "models").glob("*_model.joblib")))
@@ -291,6 +487,7 @@ class ReportBuilder:
         else:
             self.avg_r2_by_horizon = pd.DataFrame()
             self.best_row = None
+        self.champions = self._compute_champions(self.eval_df)
         if self.availability:
             pcts = [v.get("observed_availability_pct", 0) for v in self.availability.values()]
             self.avg_availability = sum(pcts) / len(pcts) if pcts else 0
@@ -309,6 +506,159 @@ class ReportBuilder:
         self.n_api_endpoints = len(self.api_endpoint_list)
         api_test_path = BASE / "tests" / "test_api.py"
         self.n_api_tests = len(re.findall(r'^def test_', api_test_path.read_text(encoding="utf-8"), re.MULTILINE)) if api_test_path.exists() else 0
+
+    def _compute_champions(self, df):
+        """Champion model per horizon x level (turbine/farm) from evaluation_metrics.csv.
+
+        Champion = model with the minimum mean RMSE within each horizon x level cell,
+        aggregated over all targets of that level (equal weight per target). The level is
+        derived from the target name (farm_total_power* -> farm, otherwise turbine).
+        Returns a DataFrame with columns horizon, level, champion, rmse, r2,
+        skill_vs_ridge, best_ml, best_ml_rmse, or an empty DataFrame if not computable.
+        """
+        empty = pd.DataFrame()
+        if df is None or df.empty or not {"model", "rmse", "target"}.issubset(df.columns):
+            return empty
+        d = df.copy()
+        d["level"] = d["target"].astype(str).map(
+            lambda t: "farm" if t.lower().startswith("farm") else "turbine")
+        agg = d.groupby(["horizon", "level", "model"], observed=True).agg(
+            rmse=("rmse", "mean"),
+            r2=("r2", "mean"),
+            skill_vs_ridge=("skill_vs_ridge", "mean"),
+        ).round(4).reset_index()
+        if agg.empty:
+            return empty
+        best = agg.loc[agg.groupby(["horizon", "level"], observed=True)["rmse"].idxmin()]
+        best = best.rename(columns={"model": "champion"})
+        ml = agg[agg["model"].isin(["lightgbm", "xgboost"])]
+        if ml.empty:
+            best_ml = best[["horizon", "level"]].copy()
+            best_ml["best_ml"] = ""
+            best_ml["best_ml_rmse"] = float("nan")
+        else:
+            best_ml = ml.loc[ml.groupby(["horizon", "level"], observed=True)["rmse"].idxmin()][
+                ["horizon", "level", "model", "rmse"]].rename(
+                columns={"model": "best_ml", "rmse": "best_ml_rmse"})
+        out = best.merge(best_ml, on=["horizon", "level"], how="left")
+        order = {h: i for i, h in enumerate(HORIZON_ORDER)}
+        out["_ho"] = out["horizon"].map(order).fillna(len(order))
+        out["_lo"] = out["level"].map({"turbine": 0, "farm": 1}).fillna(2)
+        return out.sort_values(["_ho", "_lo"]).drop(columns=["_ho", "_lo"]).reset_index(drop=True)
+
+    def _perf_overview_intro(self):
+        """Data-driven Section 5.1 lead-in (TURBINE level only; farm is Section 5.4).
+
+        States the actual turbine-level champion distribution (per Section 1
+        champion table) and the true 10-min -> 24-hour R2 degradation, so the
+        overview never repeats a stale hardcoded number, ignores a dominant
+        baseline, or merges turbine and farm results into one claim.
+        """
+        df = self.eval_df
+        if df is None or df.empty:
+            return ("The following table summarizes mean turbine R2 (average of 12 individual turbine "
+                    "R2 values) per model per horizon. Performance degrades from short to long horizons, "
+                    "consistent with the inherent difficulty of longer-range wind power prediction.")
+        tb = df[(df["target"].astype(str).str.startswith("TB"))
+                & (df["model"].isin(["lightgbm", "xgboost", "ridge", "persistence"]))]
+        if tb.empty:
+            return ("The following table summarizes mean turbine R2 (average of 12 individual turbine "
+                    "R2 values) per model per horizon.")
+
+        gr = tb.groupby(["horizon", "model"])["r2"].mean()
+
+        def best_r2(h):
+            try:
+                return float(gr.loc[h].max())
+            except Exception:
+                return float("nan")
+
+        r2_10 = best_r2("10min")
+        r2_24 = best_r2("24hour")
+
+        # Turbine-only champion distribution (Section 5.1 covers turbines; the
+        # farm-total champions are reported separately in Section 5.4).
+        cells = self.champions
+        champion_phrase = ""
+        if cells is not None and not cells.empty:
+            tcells = cells[cells["level"] == "turbine"]
+            if not tcells.empty:
+                counts = tcells["champion"].value_counts()
+                n = len(tcells)
+                rid = int(counts.get("ridge", 0))
+                lgb = int(counts.get("lightgbm", 0))
+                xgb = int(counts.get("xgboost", 0))
+                per = int(counts.get("persistence", 0))
+                if rid + lgb + xgb + per == n and n > 0:
+                    parts = []
+                    if rid:
+                        parts.append(f"Ridge is the champion (min mean RMSE) in {rid} of {n} turbine cells")
+                    if lgb:
+                        cells_list = ", ".join(
+                            f"{r['horizon']}"
+                            for _, r in tcells[tcells["champion"] == "lightgbm"].iterrows())
+                        parts.append(f"LightGBM is the champion in {lgb} of {n} turbine cells ({cells_list})")
+                    if xgb:
+                        parts.append(f"XGBoost is the champion in {xgb} of {n} turbine cells")
+                    if per:
+                        parts.append(f"persistence is the champion in {per} of {n} turbine cells")
+                    champion_phrase = ". ".join(parts) + ". "
+
+        # Turbine-level XGB vs LGBM parity, always stated as the actual gap from
+        # metrics.csv (no fixed 0.01 threshold, no farm conflation).
+        parity = ""
+        gap = self._turbine_parity_gap()
+        if gap is not None:
+            parity = (f"At turbine level, LightGBM and XGBoost mean R<super>2</super> differ by at most "
+                      f"{gap:.3f} across horizons. ")
+
+        deg = ""
+        if pd.notna(r2_10) and pd.notna(r2_24):
+            deg = (f"Best mean turbine R2 degrades from {r2_10:.3f} at 10-min to "
+                   f"{r2_24:.3f} at 24-hour, consistent with the inherent difficulty of longer-range "
+                   "wind power prediction.")
+        return (f"The following table summarizes mean turbine R2 (average of 12 individual turbine "
+                f"R2 values, from <i>metrics.csv</i>) per model per horizon. {champion_phrase}{parity}{deg}")
+
+    def _append_champion_table(self, s, title=None, level=None):
+        """Emit the champion-model-per-horizon table (optionally restricted to a
+        single level) plus its methodology note.
+
+        The table is generated purely from evaluation_metrics.csv (via self.champions);
+        no hand-written model rankings are used anywhere in the report narrative.
+        Turbine-avg and farm-total are rendered as two separate tables so the two
+        levels are never conflated into a single claim.
+        """
+        cells = self.champions
+        if cells is None or cells.empty:
+            return
+        if level:
+            cells = cells[cells["level"] == level]
+        if cells.empty:
+            return
+        if title:
+            self.story.append(Paragraph(f"<b>{title}.</b>", s["BodyText2"]))
+        self.story.append(Paragraph(
+            "The champion is the model with the lowest mean RMSE within each horizon \u00d7 level "
+            "cell, computed directly from <i>evaluation_metrics.csv</i>; all four models compete "
+            "(LightGBM, XGBoost, Ridge, persistence). The best ML model (LightGBM or XGBoost) per "
+            "cell is listed for comparison.",
+            s["BodyText2"],
+        ))
+        rows = [["Horizon", "Level", "Champion", "RMSE (kW)", "R2", "Best ML", "Best ML RMSE (kW)"]]
+        for _, r in cells.iterrows():
+            rows.append([
+                r["horizon"],
+                LEVEL_DISPLAY.get(r["level"], r["level"]),
+                MODEL_DISPLAY.get(r["champion"], r["champion"]),
+                f"{r['rmse']:.1f}",
+                f"{r['r2']:.4f}",
+                MODEL_DISPLAY.get(r["best_ml"], r["best_ml"]) if r["best_ml"] else "-",
+                f"{r['best_ml_rmse']:.1f}" if pd.notna(r["best_ml_rmse"]) else "-",
+            ])
+        self.story.append(Spacer(1, 2 * mm))
+        self.story.append(_make_table(rows, col_widths=[20 * mm, 22 * mm, 28 * mm, 24 * mm, 22 * mm, 24 * mm, 28 * mm]))
+        self.story.append(Spacer(1, 3 * mm))
 
     def _add_page_number(self, canvas, doc):
         canvas.saveState()
@@ -346,7 +696,9 @@ class ReportBuilder:
             ["Horizons", "10 min, 30 min, 1 h, 6 h, 24 h"],
             ["API Framework", f"FastAPI + Uvicorn ({self.n_api_endpoints} endpoints)"],
             ["", ""],
-            ["Date", datetime.now().strftime("%B %d, %Y")],
+            ["Report Date", self.eval_window.get("report_date", "2026-08-01")[:10]],
+            ["Generated", datetime.now().strftime("%B %d, %Y at %H:%M")],
+            ["Git Commit", self.git_commit if self.git_commit else "n/a"],
             ["Version", "2.1.0"],
         ]
         tbl = _make_table(info, col_widths=[50 * mm, 90 * mm], header_color=BLUE_DARK)
@@ -382,6 +734,8 @@ class ReportBuilder:
             ("", "5.7 Alert Accuracy"),
             ("", "5.8 Validation Charts"),
             ("", "5.9 Full Backtest Results"),
+            ("", "5.10 Prediction Interval Calibration"),
+            ("", "5.11 NWP Integration Status"),
             ("6.", "API & Dashboard"),
             ("", "6.1 System Architecture"),
             ("", "6.2 API Endpoints"),
@@ -403,6 +757,7 @@ class ReportBuilder:
             ("", "12.1 Conclusions"),
             ("", "12.2 Future Work"),
             ("A.", "Appendix A. Response to Review Comments (v2.0.0)"),
+            ("B.", "Appendix B. Detailed Backtest Tables"),
         ]
         for num, title in sections:
             indent = 15 if num == "" else 0
@@ -457,9 +812,13 @@ class ReportBuilder:
             f"REST API serves {self.n_api_endpoints} endpoints including real-time prediction, evaluation metrics, "
             "and alert generation. The system writes every output file according to the project output "
             "schema (Section 15: Dinh dang file dau ra) with defined column names, forecast_quality labels, "
-            "and 95% confidence-interval fields.",
+            "and confidence-interval fields (calibration assessed in Section 5.10, not assumed at a "
+            "nominal level).",
             s["BodyText2"],
         ))
+
+        self._append_champion_table(s, title="Champion model per horizon \u2014 turbine-avg (min mean RMSE)", level="turbine")
+        self._append_champion_table(s, title="Champion model per horizon \u2014 farm-total (min mean RMSE)", level="farm")
 
         self.story.append(Paragraph(
             f"<b>v2.1.0 revision note:</b> This revision addresses the reviewer comments on report v2.0.0 "
@@ -573,9 +932,11 @@ class ReportBuilder:
             f"window (test window ends {ew.get('test_window_official_end', 'N/A')[:10]}). "
             "(2) to obtain a regular 10-minute grid the pipeline re-indexes the timestamp axis, which "
             f"introduces <b>{n_synth:,} synthetic rows</b> out of {n_proc:,} processed timestamps "
-            "(synthetic_ratio {self.reindex.get('synthetic_ratio_pct', 0):.2f}%) — these rows are "
-            "forward-filled with observed values, flagged is_synthetic/is_imputed=1, and are excluded "
-            "from the leakage audit (Section 4.4).",
+            f"(synthetic ratio {self.reindex.get('synthetic_ratio_pct', 0):.2f}%) \u2014 these rows are "
+            "forward-filled with observed values and flagged <b>is_synthetic=1</b>; any row whose value "
+            "was forward-filled is flagged <b>is_imputed=1</b>. Rows whose target is synthetic or imputed "
+            "are <b>excluded from the official evaluation metrics</b> (Section 5.1) and from the "
+            "leakage audit (Section 4.4).",
             s["BodyText2"],
         ))
 
@@ -604,13 +965,7 @@ class ReportBuilder:
         self.story.append(_make_table(data_groups, col_widths=[35 * mm, 60 * mm, 20 * mm, 30 * mm]))
 
         self.story.append(Paragraph("3.2  Data Quality Analysis", s["SectionH2"]))
-        self.story.append(Paragraph(
-            "Data quality was assessed by computing missing rates per column. Most turbines show 6.5-7.3% "
-            "missing data (classified as 'Minor gaps'), while TB05 has the highest missing rate at 10.76% "
-            "(classified as 'Moderate missing data'). The farm-level aggregate power column has 0% missing "
-            "data, indicating reliable total production records.",
-            s["BodyText2"],
-        ))
+        self.story.append(Paragraph(self._data_quality_intro(), s["BodyText2"]))
 
         if not self.dq_df.empty:
             turbine_rows = self.dq_df[self.dq_df["column"].str.startswith("TB") & self.dq_df["column"].str.contains("wind_speed")]
@@ -624,6 +979,31 @@ class ReportBuilder:
                 self.story.append(_make_table(dq_data, col_widths=[35 * mm, 40 * mm, 55 * mm]))
 
         self.story.append(Paragraph("3.3  Turbine Availability", s["SectionH2"]))
+        self.story.append(Paragraph(
+            "Availability is computed from the test period (test window ends "
+            f"{self.eval_window.get('test_window_official_end', 'N/A')[:10]}). To make the definition "
+            "unambiguous, three complementary metrics are reported per turbine:",
+            s["BodyText2"],
+        ))
+        avail_metrics = [
+            ["Metric", "Formula", "Meaning"],
+            ["Observed availability",
+             "Generating / (Generating + Stopped + Curtailed + Standby + Comm. loss) x 100",
+             "Fraction of time with valid telemetry during which the turbine generated (operational availability)."],
+            ["Calendar availability",
+             "Generating / Total elapsed hours x 100",
+             "Fraction of the full calendar test period actually generating; penalises missing telemetry."],
+            ["Data coverage",
+             "Observed hours / Total elapsed hours x 100",
+             "Share of the calendar period with telemetry present (observed = generating + stopped + curtailed + standby + comm. loss)."],
+        ]
+        self.story.append(_make_table(avail_metrics, col_widths=[40 * mm, 62 * mm, 66 * mm]))
+        self.story.append(Paragraph(
+            "Observed availability is the headline figure used throughout this report; calendar availability "
+            "and data coverage are reported alongside it so that a low headline value can be attributed to "
+            "either low generation or missing telemetry (e.g. TB12, Section 5.5).",
+            s["BodyText2"],
+        ))
         if self.availability:
             pcts = [(k, v.get("observed_availability_pct", 0)) for k, v in self.availability.items()]
             best_tb = max(pcts, key=lambda x: x[1])
@@ -637,14 +1017,15 @@ class ReportBuilder:
             ))
         else:
             self.story.append(Paragraph(
-                "Availability was computed from the test period. The average availability across all turbines "
-                "is approximately 84.05%. TB04 has the highest availability at 85.92%, while TB12 has the "
-                "lowest at 76.43%.",
+                "Availability was computed from the test period, but the per-turbine availability report "
+                "(availability_report.json) could not be loaded, so per-turbine availability numbers are "
+                "not restated here.",
                 s["BodyText2"],
             ))
 
         if self.availability:
-            avail_data = [["Turbine", "Generating (hrs)", "Stopped (hrs)", "Missing (hrs)", "Availability (%)"]]
+            avail_data = [["Turbine", "Generating (hrs)", "Stopped (hrs)", "Missing (hrs)",
+                           "Observed Avail. (%)", "Calendar Avail. (%)", "Data Cov. (%)"]]
             for tb_id in [f"TB{i:02d}" for i in range(1, 13)]:
                 key = f"{tb_id}_power"
                 if key in self.availability:
@@ -655,8 +1036,10 @@ class ReportBuilder:
                         f"{info.get('stopped_hours', 0):,.0f}",
                         f"{info.get('missing_hours', 0):,.0f}",
                         f"{info.get('observed_availability_pct', 0):.2f}",
+                        f"{info.get('calendar_availability_pct', 0):.2f}",
+                        f"{info.get('data_coverage_pct', 0):.2f}",
                     ])
-            self.story.append(_make_table(avail_data, col_widths=[22 * mm, 32 * mm, 28 * mm, 28 * mm, 32 * mm]))
+            self.story.append(_make_table(avail_data, col_widths=[20 * mm, 26 * mm, 22 * mm, 22 * mm, 28 * mm, 28 * mm, 22 * mm]))
 
         self.story.append(PageBreak())
 
@@ -679,6 +1062,7 @@ class ReportBuilder:
             ["1", "load_data.py", "Load 11 raw SCADA Excel files"],
             ["2", "column_mapping.py", "Standardize SCADA column names"],
             ["3", "data_validation.py", "Validate ranges, units, completeness"],
+            ["3b", "data_validation.py", "Timestamp coverage audit, duplicates, timezone"],
             ["4", "preprocessing.py", "Clean, resample, handle missing values"],
             ["5", "feature_engineering.py", "Create lags, rolling stats, temporal features"],
             ["6", "split_time_series.py", "Time-based 70/15/15 train/val/test split"],
@@ -689,6 +1073,8 @@ class ReportBuilder:
             ["11", "predict.py + evaluate.py", "Generate predictions + compute metrics"],
             ["12", "predict.py", "Create forecast output with confidence intervals"],
             ["13", "evaluate.py", "Generate 6 summary visualizations"],
+            ["14", "generate_outputs.py", "Generate all doc Section 15 output files"],
+            ["15", "inventory.py", "Provenance — reindex additions + auto inventory"],
         ]
         self.story.append(_make_table(pipeline_data, col_widths=[15 * mm, 42 * mm, 85 * mm]))
 
@@ -721,8 +1107,8 @@ class ReportBuilder:
             s["BodyText2"],
         ))
 
-        self.story.append(Paragraph("Train / Validation / Test Split (observed timestamps):", s["SectionH3"]))
-        split_info = [["Split", "Rows", "Unique TS", "Missing", "Coverage", "Date Range"]]
+        self.story.append(Paragraph("Train / Validation / Test Split (row provenance):", s["SectionH3"]))
+        split_info = [["Split", "Rows", "Observed", "Synthetic", "Imputed", "Obs. not imputed", "Date Range"]]
         if self.split_stats:
             for name, label in [("train", "Train (70%)"), ("validation", "Validation (15%)"), ("test", "Test (15%)")]:
                 st = self.split_stats.get(name, {})
@@ -730,18 +1116,26 @@ class ReportBuilder:
                     split_info.append([
                         label,
                         f"{st.get('rows', 0):,}",
-                        f"{st.get('unique_timestamps', 0):,}",
-                        f"{st.get('n_missing_timestamps', 0):,}",
-                        f"{st.get('coverage_ratio', 0):.2%}",
+                        f"{st.get('n_observed_rows', '-'):,}" if "n_observed_rows" in st else "-",
+                        f"{st.get('n_synthetic_rows', '-'):,}" if "n_synthetic_rows" in st else "-",
+                        f"{st.get('n_imputed_rows', '-'):,}" if "n_imputed_rows" in st else "-",
+                        f"{st.get('n_observed_not_imputed_rows', '-'):,}" if "n_observed_not_imputed_rows" in st else "-",
                         f"{str(st.get('timestamp_start', ''))[:10]} to {str(st.get('timestamp_end', ''))[:10]}",
                     ])
         else:
             train_end = int(312000 * 0.7)
             val_end = int(312000 * (0.7 + 0.15))
-            split_info.append(["Train (70%)", f"{train_end:,}", "", "", "", "~Jan 2021 to Apr 2024"])
-            split_info.append(["Validation (15%)", f"{val_end - train_end:,}", "", "", "", "~Apr 2024 to Oct 2024"])
-            split_info.append(["Test (15%)", f"{312000 - val_end:,}", "", "", "", "~Oct 2024 to Jul 2026"])
-        self.story.append(_make_table(split_info, col_widths=[28 * mm, 22 * mm, 22 * mm, 18 * mm, 18 * mm, 42 * mm]))
+            split_info.append(["Train (70%)", f"{train_end:,}", "", "", "", "", "~Jan 2021 to Apr 2024"])
+            split_info.append(["Validation (15%)", f"{val_end - train_end:,}", "", "", "", "", "~Apr 2024 to Oct 2024"])
+            split_info.append(["Test (15%)", f"{312000 - val_end:,}", "", "", "", "", "~Oct 2024 to Jul 2026"])
+        self.story.append(Paragraph(
+            "Provenance per row is set by the pipeline (is_observed / is_synthetic / is_imputed, "
+            "Section 3.1): \u201cObserved\u201d = timestamp present in the raw union; \u201cSynthetic\u201d = row "
+            "inserted by the 10-min reindex; \u201cImputed\u201d = row whose value was forward-filled. Only "
+            "rows that are observed and not imputed are eligible to back the official metrics.",
+            s["BodyText2"],
+        ))
+        self.story.append(_make_table(split_info, col_widths=[24 * mm, 18 * mm, 20 * mm, 20 * mm, 20 * mm, 26 * mm, 40 * mm]))
 
         if self.horizon_samples:
             h_rows = [["Split", "Horizon", "Rows", "Valid Targets", "Valid Ratio"]]
@@ -772,13 +1166,20 @@ class ReportBuilder:
             self.story.append(Paragraph(f"<bullet>&bull;</bullet> {item}", s["BulletItem"]))
 
         self.story.append(Paragraph("Walk-Forward Validation:", s["SectionH3"]))
-        self.story.append(Paragraph(
-            "To assess model stability, walk-forward validation with 5 folds is performed on baseline models "
-            "(Persistence and Ridge regression). Each fold uses an expanding training window with a held-out "
-            "test segment. Mean and standard deviation of RMSE and R<super>2</super> across folds are reported "
-            "to quantify performance variability.",
-            s["BodyText2"],
-        ))
+        wf_n = self._wf_fold_count()
+        if wf_n:
+            wf_text = (f"To assess model stability, walk-forward validation with {wf_n} chronological folds is "
+                       f"performed on baseline models (Persistence and Ridge regression). Each fold uses an "
+                       f"expanding training window with a held-out test segment. Mean and standard deviation of "
+                       f"RMSE and R<super>2</super> across folds are reported to quantify performance "
+                       f"variability. The {wf_n} folds are the count actually produced by the expanding-window "
+                       f"split (walk_forward_split), not a requested target.")
+        else:
+            wf_text = ("Walk-forward validation is performed on baseline models (Persistence and Ridge "
+                       "regression). Each fold uses an expanding training window with a held-out test segment; "
+                       "mean and standard deviation of RMSE and R<super>2</super> across folds are reported to "
+                       "quantify performance variability.")
+        self.story.append(Paragraph(wf_text, s["BodyText2"]))
 
         self.story.append(Paragraph("4.4  Model Training", s["SectionH2"]))
         self.story.append(Paragraph(
@@ -805,17 +1206,54 @@ class ReportBuilder:
         ]
         self.story.append(_make_table(model_data, col_widths=[45 * mm, 40 * mm, 40 * mm]))
 
+        self.story.append(Paragraph(
+            "<b>Hyperparameter tuning (evidence trail):</b> the pipeline exposes an optional tuning "
+            "stage (<font color='#2F5496'>training.tuning.enabled</font> in config.yaml, default "
+            "<b>false</b>). When enabled, it runs a 12-iteration Bayesian-style random search on "
+            "XGBoost and LightGBM using TimeSeriesSplit cross-validation (3 folds, expanding window) "
+            "per turbine-horizon target, records the per-fold and mean CV RMSE for every trial, and "
+            "persists two evidence files: "
+            "<font color='#2F5496'>data/metadata/tuning_results.csv</font> (per-trial, per-fold, mean "
+            "CV RMSE) and <font color='#2F5496'>data/metadata/best_params.json</font> (winning "
+            "hyperparameters per target). The shipped models in this report use the fixed "
+            "hyperparameters in the table above (tuning disabled); re-running <font color='#2F5496'>"
+            "main.py</font> with tuning enabled replaces those parameters and records the full "
+            "evidence trail for re-audit.",
+            s["BodyText2"],
+        ))
+
         if not self.leakage_df.empty:
             self.story.append(Paragraph("Leakage Audit (every trained model):", s["SectionH3"]))
-            n_flagged = int(self.leakage_df.get("contains_future_marker", pd.Series(dtype=bool)).sum())
+            n_flagged = int(self.leakage_df.get("leakage_free", pd.Series(dtype=bool)).eq(False).sum())
             n_feats = int(self.leakage_df.get("n_features", pd.Series(dtype=float)).sum())
+            full = self.leakage_full_df
+            if not full.empty and "model" in full.columns:
+                fam_rows = []
+                for fam in ["ridge", "xgboost", "lightgbm"]:
+                    sub = full[full["model"] == fam]
+                    if sub.empty:
+                        continue
+                    flagged = int(sub.get("all_passed", pd.Series(dtype=bool)).eq(False).sum())
+                    fam_rows.append(f"{fam}: {len(sub)} models, {flagged} flagged")
+                fam_txt = "; ".join(fam_rows) + "."
+                n_ml = int((full["model"] != "ridge").sum())
+                span_txt = (f"The audit covers <b>{len(full)} model fits</b> across "
+                            f"ridge, XGBoost and LightGBM ({n_ml} ML fits), each checked per "
+                            f"turbine and per horizon (10 min/30 min/1 h/6 h/24 h). Breakdown: {fam_txt}")
+            else:
+                span_txt = ""
             self.story.append(Paragraph(
                 f"The pipeline runs an automated leakage audit over every trained model. Each model's "
                 f"persisted feature list is checked for any target/future marker "
                 f"(e.g. '_target_', '_missing', '_status', '_is_anomaly', '_anomaly_score', "
-                f"'_is_stopped', '_failure_event'). Result: "
+                f"'_is_stopped', '_failure_event'); the audit also verifies that the target column "
+                f"P(t+h) is not among the features, that no future-leaning feature is present, that "
+                f"timestamps satisfy timestamp_target = timestamp_issue + horizon, and that no two "
+                f"models return identical predictions. {span_txt} Result (Ridge audit, all horizons): "
                 f"<b>{n_flagged} flagged models out of {len(self.leakage_df)}</b> audited "
-                f"({n_feats:,} features used in total). A non-zero count aborts the pipeline (fail-closed).",
+                f"({n_feats:,} features used in total). A non-zero count aborts the pipeline (fail-closed); "
+                f"the full per-family audit is persisted to "
+                "<font color='#2F5496'>data/metadata/leakage_audit_full.csv</font>.",
                 s["BodyText2"],
             ))
 
@@ -849,64 +1287,60 @@ class ReportBuilder:
         self.story.append(_section_line())
 
         self.story.append(Paragraph("5.1  Model Performance Overview", s["SectionH2"]))
-        self.story.append(Paragraph(
-            "The following table summarizes mean turbine R<super>2</super> (average of 12 individual turbine "
-            "R<super>2</super> values) per model per horizon. XGBoost and LightGBM show comparable performance "
-            "(within 0.01 R<super>2</super>) across all horizons. Performance degrades from "
-            "<b>R<super>2</super> ~0.933 at 10-min</b> to <b>R<super>2</super> ~0.207 at 24-hour</b>, "
-            "consistent with the inherent difficulty of longer-range wind power prediction.",
-            s["BodyText2"],
-        ))
+        self.story.append(Paragraph(self._perf_overview_intro(), s["BodyText2"]))
 
-        if not self.eval_df.empty:
-            agg_cols_avail = [c for c in ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2", "skill_score", "skill_vs_ridge", "n_samples"] if c in self.eval_df.columns]
-            agg = self.eval_df[self.eval_df["target"].str.startswith("TB")].groupby(
-                ["horizon", "model"]
-            )[agg_cols_avail].mean().reset_index()
+        if not self.metrics_df.empty:
+            m = self.metrics_df[self.metrics_df["turbine_id"] != "farm"]
+            if not m.empty:
+                agg_cols_avail = [c for c in ["MAE", "RMSE", "nMAE", "nRMSE", "Bias", "R2",
+                                              "skill_score", "skill_vs_ridge", "n_samples"]
+                                  if c in m.columns]
+                agg = m.groupby(["horizon", "model"])[agg_cols_avail].mean().reset_index()
 
-            summary_data = [["Horizon", "Model"]]
-            for col in ["MAE", "nMAE%", "RMSE", "nRMSE%", "Bias", "R2", "SklP", "SklR", "n"]:
-                summary_data[0].append(col)
-            for _, row in agg.iterrows():
-                row_data = [row["horizon"], row["model"]]
-                col_map = {"MAE": "mae", "nMAE%": "nmae_pct", "RMSE": "rmse", "nRMSE%": "nrmse_pct",
-                           "Bias": "bias", "R2": "r2", "SklP": "skill_score", "SklR": "skill_vs_ridge",
-                           "n": "n_samples"}
-                for header in ["MAE", "nMAE%", "RMSE", "nRMSE%", "Bias", "R2", "SklP", "SklR", "n"]:
-                    c = col_map[header]
-                    if c in agg.columns:
-                        v = row.get(c, None)
-                        if c == "r2":
-                            row_data.append(f"{v:.4f}" if pd.notna(v) else "-")
-                        elif c in ("bias",):
-                            row_data.append(f"{v:+.1f}" if pd.notna(v) else "-")
-                        elif c in ("nmae_pct", "nrmse_pct"):
-                            row_data.append(f"{v:.1f}" if pd.notna(v) else "-")
-                        elif c in ("skill_score", "skill_vs_ridge"):
-                            row_data.append(f"{v:.3f}" if pd.notna(v) else "-")
-                        elif c == "n_samples":
-                            row_data.append(f"{v:,.0f}" if pd.notna(v) else "-")
+                summary_data = [["Horizon", "Model"]]
+                for col in ["MAE", "nMAE%", "RMSE", "nRMSE%", "Bias", "R2", "SklP", "SklR", "n"]:
+                    summary_data[0].append(col)
+                for _, row in agg.iterrows():
+                    row_data = [row["horizon"], row["model"]]
+                    col_map = {"MAE": "MAE", "nMAE%": "nMAE", "RMSE": "RMSE", "nRMSE%": "nRMSE",
+                               "Bias": "Bias", "R2": "R2", "SklP": "skill_score", "SklR": "skill_vs_ridge",
+                               "n": "n_samples"}
+                    for header in ["MAE", "nMAE%", "RMSE", "nRMSE%", "Bias", "R2", "SklP", "SklR", "n"]:
+                        c = col_map[header]
+                        if c in agg.columns:
+                            v = row.get(c, None)
+                            if c == "R2":
+                                row_data.append(f"{v:.4f}" if pd.notna(v) else "-")
+                            elif c == "Bias":
+                                row_data.append(f"{v:+.1f}" if pd.notna(v) else "-")
+                            elif c in ("nMAE", "nRMSE"):
+                                row_data.append(f"{v:.1f}" if pd.notna(v) else "-")
+                            elif c in ("skill_score", "skill_vs_ridge"):
+                                row_data.append(f"{v:.3f}" if pd.notna(v) else "-")
+                            elif c == "n_samples":
+                                row_data.append(f"{v:,.0f}" if pd.notna(v) else "-")
+                            else:
+                                row_data.append(f"{v:.1f}" if pd.notna(v) else "-")
                         else:
-                            row_data.append(f"{v:.1f}" if pd.notna(v) else "-")
-                    else:
-                        row_data.append("-")
-                summary_data.append(row_data)
-            self.story.append(_make_table(summary_data, col_widths=[15 * mm, 14 * mm, 13 * mm, 13 * mm, 13 * mm, 14 * mm, 13 * mm, 14 * mm, 14 * mm, 13 * mm]))
-            self.story.append(Paragraph(
-                "SklP = skill vs persistence; SklR = skill vs Ridge; both on identical samples (Section 4.5). "
-                "n = mean valid test samples per row.",
-                s["Caption"],
-            ))
+                            row_data.append("-")
+                    summary_data.append(row_data)
+                self.story.append(_make_table(summary_data, col_widths=[15 * mm, 14 * mm, 13 * mm, 13 * mm, 13 * mm, 14 * mm, 13 * mm, 14 * mm, 14 * mm, 13 * mm]))
+                self.story.append(Paragraph(
+                    "Mean of the 12 turbine rows per (horizon, model) cell of <i>metrics.csv</i>. "
+                    "SklP = skill vs persistence; SklR = skill vs Ridge; both on identical samples (Section 4.5). "
+                    "n = mean valid test samples per row.",
+                    s["Caption"],
+                ))
 
         self.story.append(Spacer(1, 4 * mm))
         self.story.append(self._figure("01_performance_heatmap.png", "Model performance heatmap across turbines and horizons"))
 
         self.story.append(Paragraph("Walk-Forward Validation (Baselines):", s["SectionH3"]))
-        self.story.append(Paragraph(
-            "Walk-forward validation across 5 chronological folds assesses model stability. Values "
-            "are mean +/- standard deviation across folds.",
-            s["BodyText2"],
-        ))
+        wf_text2 = ("Values are mean +/- standard deviation across folds.")
+        if self._wf_fold_count():
+            wf_text2 = (f"Walk-forward validation across {self._wf_fold_count()} chronological folds (baselines). "
+                        f"Values are mean +/- standard deviation across folds.")
+        self.story.append(Paragraph(wf_text2, s["BodyText2"]))
         wf_data = [["Model", "Horizon", "RMSE (kW)", "R2"]]
         if self.walk_forward:
             for tb_id in ["persistence", "ridge"]:
@@ -957,28 +1391,29 @@ class ReportBuilder:
         self.story.append(self._figure("02_horizon_decay.png", "R2 degradation across forecast horizons"))
 
         self.story.append(PageBreak())
-        self.story.append(Paragraph("5.3  Model Comparison", s["SectionH2"]))
+        self.story.append(Paragraph("5.3  Model Comparison (turbine-avg)", s["SectionH2"]))
         if not self.avg_r2_by_horizon.empty:
-            lgb_best = ""
-            xgb_best = ""
-            for (h, m), row in self.avg_r2_by_horizon.iterrows():
-                if m == "lightgbm":
-                    lgb_best = f"{h}={row['mean']:.4f}"
-                if m == "xgboost":
-                    xgb_best = f"{h}={row['mean']:.4f}"
-            self.story.append(Paragraph(
-                f"XGBoost and LightGBM show nearly identical performance across all horizons "
-                f"(LightGBM R2 range: {self.avg_r2_by_horizon.xs('lightgbm', level=1)['mean'].min():.4f}-"
-                f"{self.avg_r2_by_horizon.xs('lightgbm', level=1)['mean'].max():.4f}; "
-                f"XGBoost R2 range: {self.avg_r2_by_horizon.xs('xgboost', level=1)['mean'].min():.4f}-"
-                f"{self.avg_r2_by_horizon.xs('xgboost', level=1)['mean'].max():.4f}). "
-                f"The difference between algorithms is within 0.01 R<super>2</super> at all horizons, "
-                f"indicating no meaningful performance gap.",
-                s["BodyText2"],
-            ))
+            try:
+                lgb = self.avg_r2_by_horizon.xs("lightgbm", level=1)["mean"]
+                xgb = self.avg_r2_by_horizon.xs("xgboost", level=1)["mean"]
+            except KeyError:
+                lgb, xgb = pd.Series(dtype=float), pd.Series(dtype=float)
+            common = lgb.index.intersection(xgb.index)
+            if len(common):
+                gap_parts = [f"{h}: |\u0394R<super>2</super>|={abs(lgb[h] - xgb[h]):.4f}" for h in common]
+                self.story.append(Paragraph(
+                    f"XGBoost vs LightGBM mean turbine R<super>2</super> gap per horizon: "
+                    + "; ".join(gap_parts) + ".",
+                    s["BodyText2"],
+                ))
+            else:
+                self.story.append(Paragraph(
+                    "XGBoost vs LightGBM comparison is not computable from the current evaluation table.",
+                    s["BodyText2"],
+                ))
         else:
             self.story.append(Paragraph(
-                "XGBoost and LightGBM show comparable performance at short horizons (10-min, 30-min).",
+                "Model comparison is not computable from the current evaluation table.",
                 s["BodyText2"],
             ))
         self.story.append(self._figure("07_model_comparison.png", "XGBoost vs LightGBM comparison by horizon"))
@@ -1023,6 +1458,24 @@ class ReportBuilder:
                     f"(nMAE={best_farm['nmae_pct']:.1f}%).",
                     s["BodyText2"],
                 ))
+                farm_champs = self._farm_champions()
+                if farm_champs:
+                    parts = "; ".join(
+                        f"{h}: {MODEL_DISPLAY.get(m, m)} RMSE {rmse:.0f} kW (R<super>2</super>={r2:.4f})"
+                        for h, m, rmse, r2 in farm_champs
+                    )
+                    self.story.append(Paragraph(
+                        "<b>Farm-total champions per horizon</b> (min mean RMSE from "
+                        "<i>farm_metrics.csv</i>): " + parts + ".",
+                        s["BodyText2"],
+                    ))
+                fgap = self._farm_parity_gap()
+                if fgap is not None:
+                    self.story.append(Paragraph(
+                        f"At farm-total level, LightGBM and XGBoost R<super>2</super> differ by at most "
+                        f"{fgap:.3f} across horizons (from <i>farm_metrics.csv</i>).",
+                        s["BodyText2"],
+                    ))
                 if has_corr:
                     best_corr = farm_df.loc[farm_df["r2_corrected"].idxmax()]
                     self.story.append(Paragraph(
@@ -1118,11 +1571,9 @@ class ReportBuilder:
             if r2_keys:
                 tb12_evidence = "; ".join([f"{k}: {v}" for k, v in sorted(r2_keys.items())])
         self.story.append(Paragraph(
-            "Turbine TB12 shows significantly lower forecast accuracy compared to other turbines. "
-            "It has a high missing data rate (43.89%), 13.22% zero/near-zero power output, and "
-            "12.38% frozen data ratio (245 blocks). Its wind-power correlation is weaker than "
-            "sister turbines TB09 and TB04. This warrants investigation into data quality, sensor "
-            "calibration, and operating conditions." +
+            self._tb12_intro() or
+            "Turbine TB12 shows significantly lower forecast accuracy compared to other turbines. Data-quality "
+            "issues warrant investigation into sensor calibration and operating conditions." +
             (f" <b>Evidence:</b> {tb12_evidence}." if tb12_evidence else ""),
             s["BodyText2"],
         ))
@@ -1131,7 +1582,7 @@ class ReportBuilder:
             tb12_metrics = [["Metric", "Value"]]
             key_labels = {
                 "missing_rate": "Missing Data Rate (%)",
-                "zero_rate": "Zero / Near-Zero Power (%)",
+                "stopped_rate": "Stopped / Near-Zero Power (%)",
                 "frozen_data_ratio": "Frozen/Stuck Data Ratio (%)",
                 "frozen_data_blocks": "Frozen Data Blocks",
                 "mean_power_TB12": "Mean Power (kW)",
@@ -1143,7 +1594,7 @@ class ReportBuilder:
                 "mean_wind_speed_TB12": "Mean Wind Speed TB12 (m/s)",
                 "mean_wind_speed_TB09": "Mean Wind Speed TB09 (m/s)",
                 "mean_wind_speed_TB04": "Mean Wind Speed TB04 (m/s)",
-                "wind_speed_corr_with_TB12_power": "Wind-Power Correlation TB12",
+                "wind_speed_corr_with_power": "Wind-Power Correlation TB12",
             }
             for k in key_labels:
                 if k in self.tb12:
@@ -1181,11 +1632,15 @@ class ReportBuilder:
             s["BodyText2"],
         ))
         self.story.append(Paragraph(
-            "<b>Alert semantics (per P1-05 review comment):</b> all ramp, anomaly and failure-risk alerts "
-            "are <b>informational advisories</b> generated from the forecast pipeline — they do not "
-            "replace operator decisions, SCADA trip logic, or safety interlocks, and they never "
-            "modify generation set-points. Accuracy metrics in this section therefore measure the "
-            "detection quality of the advisory stream, not an operational control function.",
+            "<b>Alert semantics:</b> all ramp, anomaly, temperature and failure-risk alerts are "
+            "<b>informational advisories</b> produced by heuristic screening "
+            "(<font color='#2F5496'>method=heuristic_screening, confirmed=False, "
+            "verification_status=SCREENING_ONLY</font> in every alert row and in "
+            "<font color='#2F5496'>data/metadata/alert_screening_summary.json</font>). They do not "
+            "replace operator decisions, SCADA trip logic, or safety interlocks, and they never modify "
+            "generation set-points. Accuracy metrics in this section therefore measure the detection "
+            "quality of the advisory stream against the heuristic ground-truth rules, not an "
+            "operational control function or confirmed event forecasts.",
             s["BodyText2"],
         ))
         if self.alert_acc:
@@ -1266,44 +1721,18 @@ class ReportBuilder:
         self.story.append(Paragraph(
             "Comprehensive backtest results covering all turbine-horizon-model combinations. "
             "Metrics shown: MAE (kW), RMSE (kW), nMAE (%), nRMSE (%), Bias (kW), "
-            "R<super>2</super>, and Forecast Skill Score (vs persistence baseline).",
+            "R<super>2</super>, and Forecast Skill Score (vs persistence baseline). "
+            "The turbine-level aggregate metrics and the per-turbine R<super>2</super> matrices are "
+            "collected in <b>Appendix B</b> (moved out of the main Results flow so Sections 5.1-5.4 "
+            "remain the concise reading path); this section keeps the walk-forward evidence and the "
+            "headline backtest summary.",
             s["BodyText2"],
         ))
 
-        if not self.eval_df.empty:
-            tb_only = self.eval_df[self.eval_df["target"].str.startswith("TB")]
-            agg = tb_only.groupby(["horizon", "model"]).agg({
-                "mae": ["mean", "std"],
-                "rmse": ["mean", "std"],
-                "nmae_pct": ["mean", "std"],
-                "nrmse_pct": ["mean", "std"],
-                "bias": ["mean", "std"],
-                "r2": ["mean", "std", "min", "max"],
-                "skill_score": ["mean", "std"],
-            }).round(4)
-
-            self.story.append(Paragraph("Table 1: Aggregate metrics across 12 turbines", s["SectionH3"]))
-            rows = [["Horizon", "Model", "MAE", "RMSE", "nRMSE%", "R2 Avg", "R2 Min", "R2 Max", "Bias", "Skill"]]
-            for h in ["10min", "30min", "1hour", "6hour", "24hour"]:
-                for m in ["lightgbm", "xgboost"]:
-                    try:
-                        r = agg.loc[(h, m)]
-                        rows.append([
-                            h, m,
-                            f"{r['mae']['mean']:.1f}+/-{r['mae']['std']:.1f}",
-                            f"{r['rmse']['mean']:.1f}+/-{r['rmse']['std']:.1f}",
-                            f"{r['nrmse_pct']['mean']:.1f}+/-{r['nrmse_pct']['std']:.1f}",
-                            f"{r['r2']['mean']:.4f}",
-                            f"{r['r2']['min']:.4f}",
-                            f"{r['r2']['max']:.4f}",
-                            f"{r['bias']['mean']:+.1f}",
-                            f"{r['skill_score']['mean']:.3f}",
-                        ])
-                    except (KeyError, TypeError):
-                        rows.append([h, m, "-", "-", "-", "-", "-", "-", "-", "-"])
-            self.story.append(_make_table(rows, col_widths=[15 * mm, 15 * mm, 22 * mm, 22 * mm, 18 * mm, 16 * mm, 14 * mm, 14 * mm, 14 * mm, 14 * mm]))
-
-        self.story.append(Paragraph("Table 2: Walk-forward validation (5-fold, mean +/- std)", s["SectionH3"]))
+        wf_title = "Walk-forward validation (mean +/- std)"
+        if self._wf_fold_count():
+            wf_title = f"Walk-forward validation ({self._wf_fold_count()}-fold, mean +/- std)"
+        self.story.append(Paragraph(wf_title, s["SectionH3"]))
         wf_rows = [["Model", "Horizon", "RMSE Mean", "RMSE Std", "R2 Mean", "R2 Std", "Folds"]]
         if self.walk_forward:
             for k in sorted(self.walk_forward):
@@ -1319,22 +1748,7 @@ class ReportBuilder:
         self.story.append(_make_table(wf_rows, col_widths=[22 * mm, 22 * mm, 28 * mm, 22 * mm, 28 * mm, 22 * mm, 18 * mm]))
 
         if not self.eval_df.empty:
-            self.story.append(Paragraph("Table 3: Per-turbine R2 matrix (best model per horizon)", s["SectionH3"]))
-            turbines = sorted(tb_only["target"].unique())
-            r2_matrix = [["Turbine"] + [f"{h}" for h in ["10min", "30min", "1hour", "6hour", "24hour"]]]
-            for tgt in turbines:
-                tgt_data = tb_only[tb_only["target"] == tgt]
-                row = [tgt.replace("_power_target", "")]
-                for h in ["10min", "30min", "1hour", "6hour", "24hour"]:
-                    sub = tgt_data[tgt_data["horizon"] == h]
-                    if not sub.empty:
-                        best_r2 = sub["r2"].max()
-                        row.append(f"{best_r2:.4f}")
-                    else:
-                        row.append("-")
-                r2_matrix.append(row)
-            self.story.append(_make_table(r2_matrix, col_widths=[35 * mm] + [28 * mm] * 5))
-
+            tb_only = self.eval_df[self.eval_df["target"].str.startswith("TB")]
             self.story.append(Paragraph(
                 f"<b>Backtest summary:</b> {len(self.eval_df)} evaluation rows across "
                 f"{tb_only['target'].nunique()} turbine targets, 2 models, 5 horizons. "
@@ -1343,6 +1757,143 @@ class ReportBuilder:
                 s["BodyText2"],
             ))
 
+        self.story.append(PageBreak())
+
+    def build_interval_calibration(self):
+        """Section 5.10 - empirical prediction-interval calibration (P1-04).
+
+        The report no longer calls y_low/y_high '95% CI'. Coverage is measured empirically from
+        coverage_calibration.csv (per-model, per-turbine and TB12-vs-others scopes) and reported
+        honestly against the nominal confidence level actually configured in predict.py.
+        """
+        s = self.styles
+        self.story.append(Paragraph("5.10  Prediction Interval Calibration", s["SectionH2"]))
+        cal_path = CSV_DIR / "coverage_calibration.csv"
+        cal_df = pd.read_csv(cal_path) if cal_path.exists() else pd.DataFrame()
+        if cal_df.empty or "empirical_coverage" not in cal_df.columns:
+            self.story.append(Paragraph(
+                "Coverage calibration could not be computed (coverage_calibration.csv missing). "
+                "The y_low/y_high bands shipped with the forecast files are therefore reported as "
+                "unverified bands, not as calibrated confidence intervals.",
+                s["BodyText2"],
+            ))
+            self.story.append(PageBreak())
+            return
+
+        scope_col = cal_df["scope"].astype(str) if "scope" in cal_df.columns else pd.Series("per_model", index=cal_df.index)
+        per_model = cal_df[scope_col == "per_model"]
+        breakdown = cal_df[scope_col.isin(["per_turbine_breakdown", "tb12_vs_others"])]
+        if per_model.empty:
+            per_model = cal_df
+
+        levels = sorted(per_model["nominal_confidence"].dropna().unique())
+        rows = [["Nominal confidence", "Empirical coverage (mean)", "Calibration error"]]
+        for conf in levels:
+            sub = per_model[per_model["nominal_confidence"] == conf]
+            emp = float(sub["empirical_coverage"].mean())
+            rows.append([f"{conf:.0%}", f"{emp:.1%}", f"{abs(emp - conf):.1%}"])
+        self.story.append(Paragraph(
+            "Forecast files ship y_low/y_high prediction bands (Section 7). Instead of labeling them "
+            "'95% CI' by assumption, the pipeline measures their <b>empirical coverage</b> on the test "
+            "window for every turbine x model x horizon and each nominal confidence level actually "
+            "configured in <font color='#2F5496'>src/predict.py</font> (the shipped bands use a nominal "
+            f"confidence of {self.eval_window.get('interval_confidence', 0.9):.2f}). Coverage is defined "
+            "as the fraction of test rows whose true value falls inside [y_low, y_high]. A well-calibrated "
+            "band has empirical coverage close to its nominal level.",
+            s["BodyText2"],
+        ))
+        self.story.append(_make_table(rows, col_widths=[56 * mm, 56 * mm, 56 * mm]))
+
+        worst = per_model.loc[per_model["calibration_error"].idxmax()]
+        tb12_row = breakdown[(breakdown["scope"].astype(str) == "tb12_vs_others") &
+                             breakdown["target"].astype(str).str.startswith("TB12")]
+        tb01_row = breakdown[(breakdown["scope"].astype(str) == "tb12_vs_others") &
+                             breakdown["target"].astype(str).str.startswith("TB01")]
+        self.story.append(Paragraph(
+            f"On the official test window the intervals are <b>not yet calibrated</b> to their nominal "
+            f"level: mean empirical coverage across all targets is "
+            f"{per_model['empirical_coverage'].mean():.1%} at the nominal level that is closest to the "
+            f"shipped bands, and the largest single deviation is "
+            f"{worst['calibration_error']:.1%} ({worst['target']} / {worst['model']} / {worst['horizon']}, "
+            f"nominal {worst['nominal_confidence']:.0%} vs empirical {worst['empirical_coverage']:.1%}). "
+            + (
+                "The per-turbine breakdown shows the deviation is unevenly distributed: "
+                f"TB12 coverage is {float(tb12_row['empirical_coverage'].iloc[0]):.1%} while TB01..TB11 "
+                f"is {float(tb01_row['empirical_coverage'].iloc[0]):.1%} at nominal "
+                f"{float(tb12_row['nominal_confidence'].iloc[0]):.0%}. "
+                if not tb12_row.empty and not tb01_row.empty else ""
+            ) +
+            "Because of this, the report deliberately avoids claiming a '95% CI'; the bands are "
+            "reported as empirical coverage bands, and interval calibration (e.g. conformal/quantile "
+            "adjustment at 0.95) is listed as future work (Section 12.2). "
+            "Full detail is in "
+            "<font color='#2F5496'>outputs/forecasts/coverage_calibration.csv</font> ("
+            f"{len(cal_df):,} rows, scope = per_model / per_turbine_breakdown / tb12_vs_others).",
+            s["BodyText2"],
+        ))
+        self.story.append(PageBreak())
+
+    def build_nwp_section(self):
+        """Section 5.11 - NWP integration status (P1-05)."""
+        s = self.styles
+        self.story.append(Paragraph("5.11  NWP Integration Status", s["SectionH2"]))
+        self.story.append(Paragraph(
+            "Numerical weather prediction (NWP) ingestion was added as an explicit interface so the "
+            "forecasts can consume meteorological inputs at each lead time. The pipeline reads "
+            "<font color='#2F5496'>data/raw/nwp_forecast.csv</font> (columns: timestamp, lead_minutes, "
+            "wind_speed, wind_direction, temperature) when present and merges each NWP value into the "
+            "feature set at the matching issue time + lead (never at or before issue time, preserving "
+            "the no-lookahead rule). When no real NWP file is supplied, the pipeline builds a "
+            "<b>stub NWP</b> series and labels every result "
+            "<font color='#2F5496'>nwp_source = stub_synthetic</font>. The stub is an oracle/perfect-"
+            "forecast upper bound (the NWP value equals the true future measurement), so the R<super>2</super> "
+            "gains below are an <b>upper bound</b> on what real NWP could contribute, not an operational "
+            "result.",
+            s["BodyText2"],
+        ))
+        nwp_path = CSV_DIR / "nwp_ablation.csv"
+        nwp_df = pd.read_csv(nwp_path) if nwp_path.exists() else pd.DataFrame()
+        if nwp_df.empty:
+            self.story.append(Paragraph(
+                "The NWP ablation was not produced by the last pipeline run "
+                "(outputs/forecasts/nwp_ablation.csv missing); re-run <font color='#2F5496'>main.py</font> "
+                "to regenerate it.",
+                s["BodyText2"],
+            ))
+        else:
+            source = str(nwp_df["nwp_source"].iloc[0])
+            rows = [["Target", "Horizon", "Features", "R2 (SCADA only)", "R2 (+NWP)", "RMSE (SCADA only)", "RMSE (+NWP)", "n"]]
+            for (tgt, hz), grp in nwp_df.sort_values(["target", "horizon"]).groupby(["target", "horizon"]):
+                base = grp[grp["feature_set"] == "scada_only"]
+                plus = grp[grp["feature_set"] == "scada_plus_nwp"]
+                if base.empty or plus.empty:
+                    continue
+                b, p = base.iloc[0], plus.iloc[0]
+                rows.append([
+                    tgt, hz, f"{int(b['n_features'])} vs {int(p['n_features'])}",
+                    f"{float(b['r2']):.3f}",
+                    f"{float(p['r2']):.3f}",
+                    f"{float(b['rmse_kw']):.0f} kW",
+                    f"{float(p['rmse_kw']):.0f} kW",
+                    str(int(p["n_samples"])),
+                ])
+            self.story.append(Paragraph(
+                "Ablation (same target, same test window): adding the lead-matched NWP columns to the "
+                "SCADA features versus SCADA-only, Ridge model. Stub NWP is used here, so the lift is an "
+                f"oracle upper bound ({source}); real-NWP performance is expected to lie below these "
+                "figures.",
+                s["BodyText2"],
+            ))
+            self.story.append(_make_table(rows, col_widths=[28 * mm, 16 * mm, 16 * mm, 20 * mm, 18 * mm, 22 * mm, 20 * mm, 14 * mm]))
+            self.story.append(Paragraph(
+                "The ablation confirms the expected result that wind speed at the exact forecast lead is "
+                "highly informative for 6 h and 24 h horizons (R<super>2</super> gains of tens of points on "
+                "the stub upper bound). Production impact depends on real NWP forecast error and is not "
+                "claimed here. Implementation: <font color='#2F5496'>src/nwp.py</font> "
+                "(load_nwp / build_stub_nwp / add_nwp_features / run_nwp_ablation), invoked from "
+                "STEP 11 of main.py.",
+                s["BodyText2"],
+            ))
         self.story.append(PageBreak())
 
     def build_api_section(self):
@@ -1409,7 +1960,8 @@ class ReportBuilder:
         self.story.append(Paragraph(
             f"All {self.n_csv} output files follow the project output schema (Section 15: Dinh dang file dau ra). "
             "Each file uses the documented column naming convention covering timestamp, model forecast, "
-            "actual values, errors, and confidence-interval fields, as listed below.",
+            "actual values, errors, and confidence-interval fields, as listed below. Interval coverage is "
+            "verified empirically in Section 5.10 rather than claimed at a nominal level.",
             s["BodyText2"],
         ))
 
@@ -1423,7 +1975,7 @@ class ReportBuilder:
 
         output_data = [
             ["File", "Columns", "Rows", "Description"],
-            ["power_forecast.csv", "timestamp_issue, timestamp_target, turbine_id,\nhorizon_min, y_pred, y_low, y_high,\nmodel_version, forecast_quality", f"{_get_row_count('power_forecast.csv'):,}", "Per-turbine power\nforecasts with 95% CI"],
+            ["power_forecast.csv", "timestamp_issue, timestamp_target, turbine_id,\nhorizon_min, y_pred, y_low, y_high,\nmodel_version, forecast_quality", f"{_get_row_count('power_forecast.csv'):,}", "Per-turbine power\nforecasts with empirical\ncoverage bands (5.10)"],
             ["farm_forecast.csv", "timestamp_issue, timestamp_target,\nhorizon_min, farm_power_pred,\nfarm_power_low, farm_power_high,\nfarm_energy_pred, forecast_quality", f"{_get_row_count('farm_forecast.csv'):,}", "Aggregated farm\npower + energy"],
             ["evaluation_metrics.csv", "target, model, horizon,\nmae, nmae_pct, rmse, nrmse_pct,\nbias, r2, max_error,\nskill_score, skill_vs_ridge,\nn_samples", f"{_get_row_count('evaluation_metrics.csv'):,}", "Detailed evaluation\nmetrics (explicit skill baselines\n+ n_samples)"],
             ["farm_bias.csv", "horizon, n_samples,\nactual_mean_kw, farm_model_mean_kw,\nbias_kw, bias_pct_rated,\nmae_kw, farm_vs_sum_turbines_kw", f"{_get_row_count('farm_bias.csv'):,}", "Farm direct-model vs\nsum-of-turbines bias (P1-04)"],
@@ -1435,7 +1987,7 @@ class ReportBuilder:
             ["failure_risk.csv", "timestamp, turbine_id, component,\nhorizon, stop_risk_score,\nmethod, recommended_action", f"{_get_row_count('failure_risk.csv'):,}", "Turbine failure\nrisk assessment"],
             ["anomaly_alert.csv", "timestamp, turbine_id,\nanomaly_score, suspected_component,\nevidence", f"{_get_row_count('anomaly_alert.csv'):,}", "Heuristic anomaly\nscreening (rules + z > 2.5)"],
             ["temperature_warning.csv", "timestamp, turbine_id,\ntemperature, warning_type,\nseverity, message", f"{_get_row_count('temperature_warning.csv'):,}", "Temperature threshold\nalerts"],
-            ["coverage_calibration.csv", "turbine_id, horizon, model,\nnominal_coverage,\nactual_coverage,\ncalibration_error", f"{_get_row_count('coverage_calibration.csv'):,}", "Conformal CI coverage\ncalibration"],
+            ["coverage_calibration.csv", "turbine_id, horizon, model,\nnominal_coverage,\nactual_coverage,\ncalibration_error", f"{_get_row_count('coverage_calibration.csv'):,}", "Empirical interval\ncoverage calibration\n(5.10)"],
             ["alert_accuracy.csv", "turbine_id, horizon, model,\nprecision, recall, f1,\nfalse_alarm_rate, balanced_accuracy", f"{_get_row_count('alert_accuracy.csv'):,}", "Ramp detection\naccuracy metrics"],
             ["anomaly_accuracy.csv", "turbine_id, method,\nprecision, recall, f1,\nfalse_alarm_rate", f"{_get_row_count('anomaly_accuracy.csv'):,}", "Anomaly detection\naccuracy metrics"],
             ["farm_horizon_window_check.csv", "horizon_a, horizon_b,\nn_common_samples,\nwindow_identical, window_start,\nwindow_end, r2_a_on_common,\nr2_b_on_common,\nr2_b_minus_a_on_common,\nn_at_capacity_*_common,\nn_zero_power_*_common", f"{_get_row_count('farm_horizon_window_check.csv'):,}", "Same-window horizon\nR2 comparison (P1-04)"],
@@ -1725,29 +2277,96 @@ class ReportBuilder:
             fm = self.farm_metrics_df[self.farm_metrics_df["horizon"] == "10min"]
             if not fm.empty and pd.notna(fm["r2"].iloc[0]):
                 farm_r2_10min = f"{fm['r2'].iloc[0]:.4f}"
+        tb12_conc = "TB12 data quality warrants investigation (sensor calibration)"
+        st_dq = self._dq_turbine_stats()
+        tb12_missing = self.tb12.get("missing_rate") if self.tb12 else None
+        if tb12_missing is not None and st_dq and st_dq.get("turbines"):
+            turbines = st_dq["turbines"]
+            others = {k: v["rate"] for k, v in turbines.items() if k not in ("TB12", "TB05")}
+            if others:
+                lo = min(others.values())
+                hi = max(others.values())
+                tb05_rate = turbines.get("TB05", {}).get("rate")
+                tb05_txt = f" (TB05: {tb05_rate:.2f}%)" if tb05_rate is not None else ""
+                tb12_conc = (f"TB12 has {tb12_missing}% missing data in the official test window vs "
+                             f"{lo:.1f}-{hi:.1f}% for other turbines{tb05_txt}, plus a "
+                             f"{self.tb12.get('frozen_data_ratio')}% frozen-data ratio — "
+                             f"sensor/data-quality investigation recommended")
+        wf_conc = "Walk-forward validation was run on baseline models (Persistence, Ridge)"
+        wf_max = self._wf_max_std()
+        wf_n = self._wf_fold_count()
+        if wf_max and wf_max["max_rmse_std"] and wf_max["max_r2_std"]:
+            wf_conc = (f"Walk-forward validation ({wf_n} folds, baselines) shows cross-fold RMSE std up to "
+                       f"{wf_max['max_rmse_std']:.1f} kW ({wf_max['max_rmse_horizon']}) and "
+                       f"R<super>2</super> std up to {wf_max['max_r2_std']:.2f} "
+                       f"({wf_max['max_r2_horizon']}) \u2014 cross-fold variability is material, so "
+                       f"'stability' is not claimed")
         conclusions = [
             f"Best model achieves R<super>2</super>={best_r2_str} (10-min horizon)",
             f"Average turbine R<super>2</super> at 10-min horizon: {avg_r2_10min_lgb} (LightGBM)",
-            f"Performance degrades to R<super>2</super>~{avg_r2_24h_lgb} at 24-hour horizon (no NWP data)",
-            "XGBoost and LightGBM show nearly identical performance (within 0.01 R<super>2</super> at all horizons)",
+            f"Performance degrades to R<super>2</super>~{avg_r2_24h_lgb} at 24-hour horizon with "
+            "SCADA-only features; the NWP ablation (Section 5.11) shows lead-matched meteorological input "
+            "raises this substantially on an oracle upper bound (real-NWP gain not yet claimed)",
             f"Farm-level R<super>2</super> reaches {farm_r2_10min} at 10-min horizon (direct on summed farm power)",
             f"Average turbine availability: {self.avg_availability:.2f}%",
-            "TB12 has ~44% missing data vs ~6-11% for other turbines, plus a high frozen-data ratio — sensor/data-quality investigation recommended",
+            tb12_conc,
             f"Observed raw coverage: {raw_pts:,} unique timestamps with {raw_gaps:,} missing (coverage {rc.get('coverage_ratio', 0):.2%}); "
-            "10-minute reindexing adds synthetic forward-filled rows, which are tracked and disclosed (Section 3.1)",
+            "10-minute reindexing adds synthetic forward-filled rows (flagged is_synthetic/is_imputed=1, "
+            "Section 3.1); rows whose target is synthetic or imputed are excluded from the official evaluation metrics",
             "Automated leakage audit confirms no trained model uses target/future columns (0 flagged); sample trace TB02/24h provides end-to-end evidence",
             f"System generates {self.n_csv} CSV output files ({self.ml_models} ML models / {self.model_artifacts_total} artifacts) following the "
-            "Section 15 output schema (column naming, forecast_quality labels, CI fields)",
-            "Walk-forward validation (5 folds) confirms baseline stability",
+            "Section 15 output schema (column naming, forecast_quality labels, CI fields with empirical "
+            "coverage calibration in 5.10)",
+            wf_conc,
             f"FastAPI serves {self.n_api_endpoints} endpoints with interactive web dashboard; API key authentication is fail-closed",
+            "Prediction bands are not yet calibrated to their nominal level (Section 5.10 measures empirical "
+            "coverage per turbine x model x horizon instead of assuming '95% CI'); interval calibration is "
+            "explicitly future work",
         ]
+        if self.champions is not None and not self.champions.empty:
+            cells = self.champions
+            for lvl in ["turbine", "farm"]:
+                lcells = cells[cells["level"] == lvl]
+                if lcells.empty:
+                    continue
+                counts = lcells["champion"].value_counts()
+                champ_summary = "; ".join(
+                    f"{MODEL_DISPLAY.get(m, m)}: {n} of {len(lcells)} cells"
+                    for m, n in counts.items()
+                )
+                conclusions.append(
+                    f"Champion model per horizon \u2014 {LEVEL_DISPLAY.get(lvl, lvl).lower()}-avg "
+                    f"(min mean RMSE, computed from <i>evaluation_metrics.csv</i>, see Section 1): "
+                    f"{champ_summary}."
+                )
+            baseline_wins = cells[cells["champion"].isin(["ridge", "persistence"])]
+            for _, r in baseline_wins.iterrows():
+                conclusions.append(
+                    f"At {r['horizon']} {LEVEL_DISPLAY.get(r['level'], r['level']).lower()}, the "
+                    f"{MODEL_DISPLAY.get(r['champion'], r['champion'])} baseline is the champion over the best ML model "
+                    f"({MODEL_DISPLAY.get(r['best_ml'], r['best_ml'])}): mean RMSE {r['rmse']:.1f} kW vs "
+                    f"{r['best_ml_rmse']:.1f} kW."
+                )
+            ml_champs = cells[cells["champion"].isin(["lightgbm", "xgboost"])]
+            for lvl in ["turbine", "farm"]:
+                mcell = ml_champs[ml_champs["level"] == lvl]
+                if mcell.empty:
+                    continue
+                ml_list = ", ".join(f"{r['horizon']}" for _, r in mcell.iterrows())
+                conclusions.append(
+                    f"ML models are the champion at {LEVEL_DISPLAY.get(lvl, lvl).lower()} level for: "
+                    f"{ml_list}. No single model dominates every horizon \u2014 "
+                    "selecting per-horizon champions or ensembling LightGBM/XGBoost with the Ridge baseline is recommended."
+                )
         for c in conclusions:
             self.story.append(Paragraph(f"<bullet>&bull;</bullet> {c}", s["BulletItem"]))
 
         self.story.append(Paragraph("12.2  Future Work", s["SectionH2"]))
         future = [
-            "Integrate NWP (Numerical Weather Prediction) data for 6-hour and 24-hour horizon improvement",
+            "Integrate real NWP forecasts (replacing the stub/oracle upper bound in Section 5.11) for 6-hour and 24-hour horizon improvement",
             "Implement direct multi-horizon models with NWP inputs for day-ahead forecasting",
+            "Calibrate the y_low/y_high bands to their nominal level (conformal/quantile adjustment) so "
+            "the forecast files can legitimately claim a '95% CI'",
             "Conduct data quality investigation and sensor calibration for TB12",
             "Deploy LSTM/Transformer models for sequence-aware temporal forecasting",
             "Extend conformal prediction intervals and quantile regression to the 6-hour and 24-hour horizons once NWP inputs are integrated",
@@ -1762,7 +2381,9 @@ class ReportBuilder:
         self.story.append(_section_line())
         self.story.append(Paragraph(
             "<i>Report generated on " + datetime.now().strftime("%B %d, %Y at %H:%M") +
-            " by generate_report.py</i>",
+            " by generate_report.py" +
+            (f" (git commit {self.git_commit})" if self.git_commit else "") +
+            "</i>",
             s["Footer"],
         ))
 
@@ -1775,7 +2396,7 @@ class ReportBuilder:
             "review of report v2.0.0 to the implemented fix and the evidence file that can be "
             "re-generated from <font color='#2F5496'>py -3.13 main.py</font>. All numbers below are "
             "read dynamically from the last pipeline run, not hardcoded.",
-            s["BodyText2"],
+            s.get("UnicodeText", s["BodyText2"]),
         ))
 
         rc = self.raw_coverage.get("overall", {}) if self.raw_coverage else {}
@@ -1787,6 +2408,16 @@ class ReportBuilder:
             leak_flagged = None
         n_synth = self.reindex.get("n_synthetic_rows_reindexed", 0) if self.reindex else 0
         n_raw = rc.get("n_rows", 0)
+        p102_overall = None
+        p102_test = None
+        st_dq2 = self._dq_turbine_stats()
+        if st_dq2 and st_dq2.get("tb12_overall") is not None:
+            p102_overall = st_dq2["tb12_overall"]
+        if self.tb12 and self.tb12.get("missing_rate") is not None:
+            p102_test = self.tb12["missing_rate"]
+        p102_issue = "TB12 missing rate inconsistent"
+        if p102_overall is not None and p102_test is not None:
+            p102_issue = f"TB12 missing rate inconsistent ({p102_overall:.2f}% per-column vs {p102_test}% test-window)"
 
         rows = [
             ["ID", "Reviewer comment (short)", "Fix implemented in v2.1.0", "Evidence (generated by main.py)"],
@@ -1811,12 +2442,21 @@ class ReportBuilder:
              "skill_vs_persistence and skill_vs_ridge are written per row with n_samples; mean +/- std "
              "aggregated afterwards. Baseline names match the walk-forward summary.",
              "outputs/forecasts/evaluation_metrics.csv (skill_score, skill_vs_ridge, n_samples), walk_forward_summary.json"],
+            ["P0-05", "Observed vs reindexed/synthetic rows conflated",
+             "preprocess_pipeline flags every row is_observed/is_synthetic/is_imputed right after the "
+             "10-min reindex (before ffill); the flags are carried through feature engineering and "
+             "get_split_statistics reports observed vs synthetic vs imputed counts per split. "
+             "evaluate_all_models / append_baseline_rows / compute_farm_level_metrics exclude rows "
+             "whose target is synthetic or imputed from the official evaluation_metrics.csv.",
+             "split_statistics.json (n_observed_rows/n_synthetic_rows/n_imputed_rows per split), "
+             "outputs/forecasts/evaluation_metrics.csv (n_samples now observed-not-imputed only), "
+             "tests/test_review_evidence.py"],
             ["P1-01", "Conflicting counts: 130/650 models, 284/426 artifacts, 15/24 endpoints, 16/23 tests",
              "All counts in the report are derived dynamically from files (evaluation_metrics.csv target x "
              "model x horizon) and from src/api.py / tests/test_api.py. An inventory_summary.json is "
              "auto-generated counting artifacts by type, API routes via app.routes, and pytest counts.",
              "data/metadata/inventory_summary.json, data/metadata/data_manifest.csv, outputs/forecasts/evaluation_metrics.csv"],
-            ["P1-02", "TB12 missing rate inconsistent (6.92% vs 43.89%)",
+            ["P1-02", p102_issue,
              "TB12 analysis separates overall missing rate vs power-column missing rate and reports the "
              "scoping explicitly; per-column data quality is available in data_quality_report.csv.",
              "data_quality_report.csv, data/metadata/tb12_analysis.json"],
@@ -1851,6 +2491,46 @@ class ReportBuilder:
         ]
         self.story.append(_make_table(rows, col_widths=[14 * mm, 36 * mm, 62 * mm, 38 * mm]))
 
+        self.story.append(Paragraph(
+            "Round 3 review (v2.1.0) \u2014 P1/P2 comment themes and fixes:",
+            s["SectionH3"],
+        ))
+        round3 = [
+            ["Theme", "Implemented fix", "Evidence"],
+            ["P1-01 Leakage audit depth (ML models)",
+             "Leakage assertions extended to every trained family (ridge + XGBoost + LightGBM) per "
+             "turbine x horizon; audit also checks target-not-in-X, no future features, "
+             "timestamp_target = timestamp_issue + horizon and non-identical predictions; fail-closed.",
+             "data/metadata/leakage_audit_full.csv, Section 4.4"],
+            ["P1-02 Tuning evidence trail",
+             "Optional tuning stage (TimeSeriesSplit CV) persists per-trial, per-fold and mean CV RMSE "
+             "plus best parameters when enabled (training.tuning.enabled, default false).",
+             "data/metadata/tuning_results.csv, best_params.json, Section 4.4"],
+            ["P1-03 Availability formulas in report",
+             "Section 3.3 now defines observed availability, calendar availability and data coverage "
+             "with explicit formulas and a per-turbine table carrying all three metrics.",
+             "availability_report.json, Section 3.3"],
+            ["P1-04 Interval calibration honesty + TB12 breakdown",
+             "The report no longer calls y_low/y_high a '95% CI'; empirical coverage is measured per "
+             "turbine x model x horizon with per-turbine and TB12-vs-others breakdowns.",
+             "outputs/forecasts/coverage_calibration.csv (scope column), Section 5.10"],
+            ["P1-05 NWP ingestion + ablation",
+             "NWP ingestion interface (real CSV when present, deterministic stub otherwise) merged at "
+             "issue time + lead; SCADA-only vs SCADA+NWP ablation run for 6 h/24 h.",
+             "src/nwp.py, outputs/forecasts/nwp_ablation.csv, Section 5.11"],
+            ["P1-06 Alert language alignment",
+             "Report wording aligned to the runtime evidence: every alert row carries "
+             "method=heuristic_screening / confirmed=False / verification_status=SCREENING_ONLY, and "
+             "Section 5.7 states alerts are informational advisories, not confirmed events.",
+             "alert_screening_summary.json, Section 5.7"],
+            ["P2 Report polish",
+             "Unicode font for Vietnamese diacritics; git commit + report date on the title page; "
+             "pipeline table now lists all 15 steps (+3b); '0% missing' overreach removed; oversized "
+             "detail tables moved to Appendix B.",
+             "this PDF (title page, Sections 3.2/4.1, Appendix B)"],
+        ]
+        self.story.append(_make_table(round3, col_widths=[42 * mm, 78 * mm, 38 * mm]))
+
         self.story.append(Paragraph("Acceptance criteria (Section 7 of the review) and status:", s["SectionH3"]))
         if not self.eval_df.empty and "model" in self.eval_df.columns:
             n_ridge_rows = int((self.eval_df["model"].astype(str).str.lower() == "ridge").sum())
@@ -1868,7 +2548,7 @@ class ReportBuilder:
                       "PASS - skill_score / skill_vs_ridge populated per row")
         a_rows = [["Code", "Criterion", "Evidence file", "Status"]]
         a_rows += [
-            ["A01", "No target/future feature in X", "leakage_audit.csv + sample_trace_TB02_24hour.csv", a01_status],
+            ["A01", "No target/future feature in X", "leakage_audit.csv + leakage_audit_full.csv + sample_trace_TB02_24hour.csv", a01_status],
             ["A02", "Timestamp & sample counts consistent", "raw_coverage_audit.json + split_statistics.json", f"Reported on observed data ({n_raw:,} raw unique ts)"],
             ["A03", "Ridge baseline realistic", "evaluation_metrics.csv", a03_status],
             ["A04", "Persistence & Forecast Skill complete", "evaluation_metrics.csv", a04_status],
@@ -1885,6 +2565,74 @@ class ReportBuilder:
         self.story.append(_make_table(a_rows, col_widths=[14 * mm, 46 * mm, 55 * mm, 35 * mm]))
         self.story.append(PageBreak())
 
+    def build_appendix_b(self):
+        """Appendix B - detailed backtest tables (P2: oversized tables moved out of Section 5.9)."""
+        s = self.styles
+        self.story.append(Paragraph("Appendix B. Detailed Backtest Tables", s["SectionH1"]))
+        self.story.append(_section_line())
+        self.story.append(Paragraph(
+            "Full turbine-level backtest detail referenced from Section 5.9. These wide/tall tables are "
+            "kept out of the main Results flow to preserve readability.",
+            s["BodyText2"],
+        ))
+
+        if self.eval_df.empty:
+            self.story.append(Paragraph(
+                "No evaluation data found (evaluation_metrics.csv missing).",
+                s["BodyText2"],
+            ))
+            self.story.append(PageBreak())
+            return
+
+        tb_only = self.eval_df[self.eval_df["target"].str.startswith("TB")]
+        agg = tb_only.groupby(["horizon", "model"]).agg({
+            "mae": ["mean", "std"],
+            "rmse": ["mean", "std"],
+            "nmae_pct": ["mean", "std"],
+            "nrmse_pct": ["mean", "std"],
+            "bias": ["mean", "std"],
+            "r2": ["mean", "std", "min", "max"],
+            "skill_score": ["mean", "std"],
+        }).round(4)
+
+        self.story.append(Paragraph("B.1  Aggregate metrics across 12 turbines", s["SectionH3"]))
+        rows = [["Horizon", "Model", "MAE", "RMSE", "nRMSE%", "R2 Avg", "R2 Min", "R2 Max", "Bias", "Skill"]]
+        for h in ["10min", "30min", "1hour", "6hour", "24hour"]:
+            for m in ["lightgbm", "xgboost"]:
+                try:
+                    r = agg.loc[(h, m)]
+                    rows.append([
+                        h, m,
+                        f"{r['mae']['mean']:.1f}+/-{r['mae']['std']:.1f}",
+                        f"{r['rmse']['mean']:.1f}+/-{r['rmse']['std']:.1f}",
+                        f"{r['nrmse_pct']['mean']:.1f}+/-{r['nrmse_pct']['std']:.1f}",
+                        f"{r['r2']['mean']:.4f}",
+                        f"{r['r2']['min']:.4f}",
+                        f"{r['r2']['max']:.4f}",
+                        f"{r['bias']['mean']:+.1f}",
+                        f"{r['skill_score']['mean']:.3f}",
+                    ])
+                except (KeyError, TypeError):
+                    rows.append([h, m, "-", "-", "-", "-", "-", "-", "-", "-"])
+        self.story.append(_make_table(rows, col_widths=[15 * mm, 15 * mm, 22 * mm, 22 * mm, 18 * mm, 16 * mm, 14 * mm, 14 * mm, 14 * mm, 14 * mm]))
+
+        self.story.append(Paragraph("B.2  Per-turbine R2 matrix (best model per horizon)", s["SectionH3"]))
+        turbines = sorted(tb_only["target"].unique())
+        r2_matrix = [["Turbine"] + [f"{h}" for h in ["10min", "30min", "1hour", "6hour", "24hour"]]]
+        for tgt in turbines:
+            tgt_data = tb_only[tb_only["target"] == tgt]
+            row = [tgt.replace("_power_target", "")]
+            for h in ["10min", "30min", "1hour", "6hour", "24hour"]:
+                sub = tgt_data[tgt_data["horizon"] == h]
+                if not sub.empty:
+                    best_r2 = sub["r2"].max()
+                    row.append(f"{best_r2:.4f}")
+                else:
+                    row.append("-")
+            r2_matrix.append(row)
+        self.story.append(_make_table(r2_matrix, col_widths=[35 * mm] + [28 * mm] * 5))
+        self.story.append(PageBreak())
+
     def build(self):
         self.build_title_page()
         self.build_toc()
@@ -1895,6 +2643,8 @@ class ReportBuilder:
         self.build_results()
         self.build_validation_charts()
         self.build_backtest_results()
+        self.build_interval_calibration()
+        self.build_nwp_section()
         self.build_api_section()
         self.build_output_section()
         self.build_compliance_matrix()
@@ -1903,6 +2653,7 @@ class ReportBuilder:
         self.build_feature_status()
         self.build_conclusions()
         self.build_review_response()
+        self.build_appendix_b()
         return self.story
 
 

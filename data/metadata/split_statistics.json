@@ -11,7 +11,12 @@
     "coverage_ratio": 1.0,
     "timezone": "None (naive)",
     "avg_power": 1036.74,
-    "total_energy_mwh": 2.42
+    "total_energy_mwh": 2.42,
+    "n_observed_rows": 218433,
+    "n_synthetic_rows": 0,
+    "n_imputed_rows": 2395,
+    "n_observed_not_imputed_rows": 216038,
+    "observed_ratio": 1.0
   },
   "validation": {
     "rows": 46807,
@@ -25,34 +30,49 @@
     "coverage_ratio": 1.0,
     "timezone": "None (naive)",
     "avg_power": 1036.21,
-    "total_energy_mwh": 2.42
+    "total_energy_mwh": 2.42,
+    "n_observed_rows": 46087,
+    "n_synthetic_rows": 720,
+    "n_imputed_rows": 679,
+    "n_observed_not_imputed_rows": 45420,
+    "observed_ratio": 0.984618
   },
   "test": {
-    "rows": 46808,
+    "rows": 28232,
     "timestamp_start": "2026-01-16 22:40:00",
-    "timestamp_end": "2026-12-07 23:50:00",
-    "expected_steps": 46808,
-    "actual_steps": 46808,
-    "unique_timestamps": 46808,
+    "timestamp_end": "2026-07-31 23:50:00",
+    "expected_steps": 28232,
+    "actual_steps": 28232,
+    "unique_timestamps": 28232,
     "n_duplicate_timestamps": 0,
     "n_missing_timestamps": 0,
     "coverage_ratio": 1.0,
     "timezone": "None (naive)",
-    "avg_power": 872.6,
-    "total_energy_mwh": 2.04
+    "avg_power": 925.55,
+    "total_energy_mwh": 2.16,
+    "n_observed_rows": 22887,
+    "n_synthetic_rows": 5345,
+    "n_imputed_rows": 501,
+    "n_observed_not_imputed_rows": 22465,
+    "observed_ratio": 0.810676
   },
   "total": {
-    "rows": 312048,
+    "rows": 293472,
     "timestamp_start": "2021-01-01 00:00:00",
-    "timestamp_end": "2026-12-07 23:50:00",
-    "expected_steps": 312048,
-    "actual_steps": 312048,
-    "unique_timestamps": 312048,
+    "timestamp_end": "2026-07-31 23:50:00",
+    "expected_steps": 293472,
+    "actual_steps": 293472,
+    "unique_timestamps": 293472,
     "n_duplicate_timestamps": 0,
     "n_missing_timestamps": 0,
     "coverage_ratio": 1.0,
     "timezone": "None (naive)",
-    "avg_power": 1010.89,
-    "total_energy_mwh": 2.36
+    "avg_power": 1026.17,
+    "total_energy_mwh": 2.39,
+    "n_observed_rows": 287407,
+    "n_synthetic_rows": 6065,
+    "n_imputed_rows": 3575,
+    "n_observed_not_imputed_rows": 283923,
+    "observed_ratio": 0.979334
   }
 }

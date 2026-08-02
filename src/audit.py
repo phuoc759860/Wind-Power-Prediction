@@ -200,22 +200,30 @@ def ridge_feature_evidence(ridge_models: Dict, config: dict) -> pd.DataFrame:
 
 def leakage_assertions(feature_data: pd.DataFrame, ridge_models: Dict,
                        config: dict, turbines: Optional[List[str]] = None,
-                       horizons: Optional[List[str]] = None) -> pd.DataFrame:
-    """Explicit P0-01 assertions per (turbine, horizon) on the TEST window.
+                       horizons: Optional[List[str]] = None,
+                       ml_models: Optional[Dict] = None) -> pd.DataFrame:
+    """Explicit P0-01 assertions per (turbine, horizon, model family) on the TEST window.
 
     For each case asserts:
-      1. target_column not in X.columns (ridge feature allow-list)
+      1. target_column not in X.columns (feature allow-list)
       2. no feature row uses information after its issue timestamp
       3. timestamp_target == timestamp_issue + horizon (10/30/60/360/1440 min)
-      4. ridge predictions are NOT numerically identical to the target
+      4. model predictions are NOT numerically identical to the target
          (i.e. no index-misalignment leakage: assert not np.allclose(y_pred, y))
-    Returns one row per case with pass/fail booleans.
+    The checks are run on the Ridge model(s) and, when `ml_models` is provided, on
+    every trained ML family (XGBoost / LightGBM) for that target, so the audit covers
+    the full feature sets of all models, not only one turbine sample.
+    Returns one row per (turbine, horizon, model family) with pass/fail booleans.
+    When ml_models is omitted the rows are restricted to Ridge, preserving the
+    original single-row-per-case shape.
     """
     horizons_map = {h["name"]: h["steps"] * 10 for h in config.get("forecasting", {}).get("horizons", [])}
     if horizons is None:
         horizons = list(horizons_map.keys())
     if turbines is None:
         turbines = config.get("turbines", {}).get("ids", [])
+
+    ml_models = ml_models or {}
 
     rows = []
     for tb in turbines:
@@ -224,71 +232,83 @@ def leakage_assertions(feature_data: pd.DataFrame, ridge_models: Dict,
             if minutes is None:
                 continue
             target = f"{tb}_power_target_{horizon}"
-            record = {
-                "turbine": tb,
-                "horizon": horizon,
-                "horizon_minutes": minutes,
-                "target_column": target,
-            }
 
-            if target not in ridge_models or target not in feature_data.columns:
-                record.update({
+            # candidate model families for this target
+            candidates = []  # (family, feature_cols, model, scaler)
+            if target in ridge_models:
+                model, scaler, fcols = ridge_models[target]
+                candidates.append(("ridge", list(fcols), model, scaler))
+            for fam in ["xgboost", "lightgbm"]:
+                key = f"{target}_{fam}"
+                if key in ml_models:
+                    info = ml_models[key]
+                    candidates.append((fam, list(info.get("feature_cols", [])),
+                                       info.get("model"), info.get("scaler")))
+
+            if not candidates:
+                rows.append({
+                    "turbine": tb,
+                    "horizon": horizon,
+                    "horizon_minutes": minutes,
+                    "target_column": target,
+                    "model": "ridge",
                     "assert_target_not_in_X": None,
                     "assert_no_future_features": None,
                     "assert_timestamp_alignment": None,
                     "assert_not_identical_to_target": None,
                     "all_passed": False,
-                    "note": "ridge model or target missing",
+                    "note": "no trained model for target",
                 })
-                rows.append(record)
                 continue
 
-            model, scaler, fcols = ridge_models[target]
+            for family, fcols, model, scaler in candidates:
+                # 1) target not in X.columns
+                assert1 = target not in fcols and not any("_target_" in c for c in fcols)
 
-            # 1) target not in X.columns
-            assert1 = target not in fcols and not any("_target_" in c for c in fcols)
+                # 2) no future features: every column is a lag/current/temporal feature.
+                #    Feature allow-list excludes all _target_/_missing/_status markers.
+                non_feature = ["timestamp", "data_split", "time_index"]
+                assert2 = not any(c in non_feature for c in fcols)
 
-            # 2) no future features: every column is a lag/current/temporal feature.
-            #    Feature allow-list excludes all _target_/_missing/_status markers.
-            non_feature = ["timestamp", "data_split", "time_index"]
-            assert2 = not any(c in non_feature for c in fcols)
+                # 3) timestamp alignment on a window of the test data
+                data = feature_data[["timestamp", target]].copy()
+                data["ts_issue"] = pd.to_datetime(data["timestamp"])
+                data["ts_target"] = data["ts_issue"] + pd.Timedelta(minutes=minutes)
+                n_checked = min(len(data), 500)
+                sample = data.tail(n_checked)
+                mismatches = int((pd.to_datetime(sample["ts_target"]) - pd.to_datetime(sample["timestamp"]) != pd.Timedelta(minutes=minutes)).sum())
+                assert3 = mismatches == 0
 
-            # 3) timestamp alignment on a window of the test data
-            assert3 = True
-            align_fail = 0
-            data = feature_data[["timestamp", target]].copy()
-            data["ts_issue"] = pd.to_datetime(data["timestamp"])
-            data["ts_target"] = data["ts_issue"] + pd.Timedelta(minutes=minutes)
-            n_checked = min(len(data), 500)
-            sample = data.tail(n_checked)
-            mismatches = int((pd.to_datetime(sample["ts_target"]) - pd.to_datetime(sample["timestamp"]) != pd.Timedelta(minutes=minutes)).sum())
-            align_fail = int(mismatches)
-            assert3 = align_fail == 0
+                # 4) predictions not identical to target (leakage-free model)
+                assert4 = True
+                try:
+                    X = data.reindex(columns=fcols, fill_value=0)
+                    if scaler is not None:
+                        X = pd.DataFrame(scaler.transform(X), columns=X.columns)
+                    preds = model.predict(X)
+                    valid = preds[~np.isnan(data[target].to_numpy())]
+                    yv = data[target].to_numpy()[~np.isnan(data[target].to_numpy())]
+                    if len(valid) > 50:
+                        assert4 = not np.allclose(valid, yv, rtol=1e-6, atol=1e-3)
+                except Exception:
+                    assert4 = None
 
-            # 4) predictions not identical to target (leakage-free ridge)
-            assert4 = True
-            try:
-                X = data.reindex(columns=fcols, fill_value=0)
-                X = pd.DataFrame(scaler.transform(X), columns=X.columns)
-                preds = model.predict(X)
-                valid = preds[~np.isnan(data[target].to_numpy())]
-                yv = data[target].to_numpy()[~np.isnan(data[target].to_numpy())]
-                if len(valid) > 50:
-                    assert4 = not np.allclose(valid, yv, rtol=1e-6, atol=1e-3)
-            except Exception:
-                assert4 = None
-
-            record.update({
-                "assert_target_not_in_X": bool(assert1),
-                "assert_no_future_features": bool(assert2),
-                "assert_timestamp_alignment": bool(assert3),
-                "n_timestamp_mismatches_checked": align_fail,
-                "assert_not_identical_to_target": bool(assert4),
-                "all_passed": bool(assert1 and assert2 and assert3 and (assert4 is not False)),
-                "note": ("Ridge trained on features available at issue time t; "
-                         "target P(t+h) is created with shift(-h) and never enters X."),
-            })
-            rows.append(record)
+                rows.append({
+                    "turbine": tb,
+                    "horizon": horizon,
+                    "horizon_minutes": minutes,
+                    "target_column": target,
+                    "model": family,
+                    "n_features": len(fcols),
+                    "assert_target_not_in_X": bool(assert1),
+                    "assert_no_future_features": bool(assert2),
+                    "assert_timestamp_alignment": bool(assert3),
+                    "n_timestamp_mismatches_checked": int(mismatches),
+                    "assert_not_identical_to_target": bool(assert4),
+                    "all_passed": bool(assert1 and assert2 and assert3 and (assert4 is not False)),
+                    "note": (f"{family} trained on features available at issue time t; "
+                             "target P(t+h) is created with shift(-h) and never enters X."),
+                })
     return pd.DataFrame(rows)
 
 

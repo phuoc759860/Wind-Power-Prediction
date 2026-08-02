@@ -90,6 +90,23 @@ def compute_skill_score(rmse_model: float, rmse_baseline: float) -> float:
     return round(1 - rmse_model / rmse_baseline, 4)
 
 
+def _provenance_mask(test_data: pd.DataFrame, length: int) -> np.ndarray:
+    """Rows allowed to back OFFICIAL metrics (P0-05).
+
+    A row must be excluded when its target is synthetic (timestamp created by
+    the 10-min reindex) or imputed (forward-filled). Returns all-True when the
+    provenance columns are absent (backward compatibility with ad-hoc data).
+    """
+    keep = np.ones(length, dtype=bool)
+    if test_data is None:
+        return keep
+    if "is_synthetic" in test_data.columns and "is_imputed" in test_data.columns:
+        syn = test_data["is_synthetic"].fillna(0).astype(int).values[:length]
+        imp = test_data["is_imputed"].fillna(0).astype(int).values[:length]
+        keep &= (syn == 0) & (imp == 0)
+    return keep
+
+
 def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict,
                         config: dict, baseline_predictions: Dict = None,
                         ridge_predictions: Dict = None,
@@ -109,18 +126,26 @@ def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict,
             continue
 
         valid = ~(np.isnan(actual) | np.isnan(pred_values))
+        # P0-05: official metrics exclude rows whose target is synthetic/imputed.
+        valid &= _provenance_mask(test_data, len(valid))
+        if valid.sum() == 0:
+            continue
 
         # P0-03: never reassign the parameter — a farm target would clobber the
         # rated power to 26400 for every later turbine row in this loop.
         rp = _rated_power_for_target(target, rated_power)
 
+        # P0-05: metrics are computed on the observed-not-imputed rows only.
+        actual_f = actual[valid]
+        pred_f = pred_values[valid]
+
         # Segment decomposition (reviewer P0-03): near-rated plateau and near-zero
-        cap_mask = (actual >= rp * 0.95) & valid
-        zero_mask = (actual <= rp * 0.01) & valid
+        cap_mask = actual_f >= rp * 0.95
+        zero_mask = actual_f <= rp * 0.01
         seg_mask = cap_mask | zero_mask
 
-        metrics = compute_metrics(actual, pred_values, rp)
-        metrics_excl = compute_metrics(actual, pred_values, rp, exclude_mask=seg_mask)
+        metrics = compute_metrics(actual_f, pred_f, rp)
+        metrics_excl = compute_metrics(actual_f, pred_f, rp, exclude_mask=seg_mask)
 
         horizon = "unknown"
         for h in config.get("forecasting", {}).get("horizons", []):
@@ -132,19 +157,19 @@ def evaluate_all_models(test_data: pd.DataFrame, predictions: Dict,
         skill_vs_persistence = np.nan
         skill_vs_ridge = np.nan
         if baseline_predictions is not None and target in baseline_predictions:
-            base_pred = np.asarray(baseline_predictions[target][:len(pred_values)], dtype=float)
-            both = valid & ~np.isnan(base_pred)
+            base_pred = np.asarray(baseline_predictions[target][:len(pred_values)], dtype=float)[valid]
+            both = ~np.isnan(base_pred)
             if both.sum() > 0:
                 skill_vs_persistence = compute_skill_score(
-                    _rmse(actual[both], pred_values[both]),
-                    _rmse(actual[both], base_pred[both]))
+                    _rmse(actual_f[both], pred_f[both]),
+                    _rmse(actual_f[both], base_pred[both]))
         if ridge_predictions is not None and target in ridge_predictions:
-            ridge_pred = np.asarray(ridge_predictions[target][:len(pred_values)], dtype=float)
-            both = valid & ~np.isnan(ridge_pred)
+            ridge_pred = np.asarray(ridge_predictions[target][:len(pred_values)], dtype=float)[valid]
+            both = ~np.isnan(ridge_pred)
             if both.sum() > 0:
                 skill_vs_ridge = compute_skill_score(
-                    _rmse(actual[both], pred_values[both]),
-                    _rmse(actual[both], ridge_pred[both]))
+                    _rmse(actual_f[both], pred_f[both]),
+                    _rmse(actual_f[both], ridge_pred[both]))
 
         hor_label = horizon.replace("hour", "h").replace("min", "min")
         results.append({
@@ -210,20 +235,24 @@ def append_baseline_rows(results_df: pd.DataFrame, test_data: pd.DataFrame,
             if len(preds) == 0:
                 continue
             valid = ~(np.isnan(actual) | np.isnan(preds))
+            valid &= _provenance_mask(test_data, len(valid))
             if valid.sum() == 0:
                 continue
             rp = _rated_power_for_target(target, rated_power)
-            m = compute_metrics(actual, preds, rp)
-            cap_mask = (actual >= rp * 0.95) & valid
-            zero_mask = (actual <= rp * 0.01) & valid
+            actual_f = actual[valid]
+            preds_f = preds[valid]
+            m = compute_metrics(actual_f, preds_f, rp)
+            cap_mask = actual_f >= rp * 0.95
+            zero_mask = actual_f <= rp * 0.01
 
             skill_other = np.nan
             if len(other) > 0:
-                both = valid & ~np.isnan(other)
+                other_f = np.asarray(other, dtype=float)[:len(actual)][valid]
+                both = ~np.isnan(other_f)
                 if both.sum() > 0:
                     skill_other = compute_skill_score(
-                        _rmse(actual[both], preds[both]),
-                        _rmse(actual[both], other[both]))
+                        _rmse(actual_f[both], preds_f[both]),
+                        _rmse(actual_f[both], other_f[both]))
             if mdl_name == "ridge":
                 skill_score = skill_other
                 skill_vs_persistence = skill_other
@@ -585,12 +614,15 @@ def compute_farm_level_metrics(test_data: pd.DataFrame, predictions: Dict,
         actual = np.asarray(test_data[target].values[:n], dtype=float)
         preds = np.asarray(pred_values[:n], dtype=float)
         valid = ~(np.isnan(actual) | np.isnan(preds))
+        valid &= _provenance_mask(test_data, len(valid))
         if valid.sum() == 0:
             continue
+        actual_f = actual[valid]
+        preds_f = preds[valid]
 
-        metrics = compute_metrics(actual, preds, rp)
-        cap_mask = (actual >= rp * 0.95) & valid
-        zero_mask = (actual <= rp * 0.01) & valid
+        metrics = compute_metrics(actual_f, preds_f, rp)
+        cap_mask = actual_f >= rp * 0.95
+        zero_mask = actual_f <= rp * 0.01
 
         row = {
             "target": target,
@@ -611,8 +643,8 @@ def compute_farm_level_metrics(test_data: pd.DataFrame, predictions: Dict,
 
         corr_info = corrected_predictions.get(model_key)
         if corr_info is not None and corr_info.get("predictions") is not None:
-            corr_preds = np.asarray(corr_info["predictions"], dtype=float)[:n]
-            corr_metrics = compute_metrics(actual, corr_preds, rp)
+            corr_preds = np.asarray(corr_info["predictions"], dtype=float)[:n][valid]
+            corr_metrics = compute_metrics(actual_f, corr_preds, rp)
             for col in ["mae", "rmse", "nmae_pct", "nrmse_pct", "bias", "r2", "max_error"]:
                 row[f"{col}_corrected"] = corr_metrics[col]
             row["n_samples_corrected"] = corr_metrics["n_samples"]
@@ -1700,6 +1732,54 @@ def evaluate_coverage_calibration(test_data: pd.DataFrame, predictions: Dict,
             })
 
     df = pd.DataFrame(records)
+    if not df.empty and "target" in df.columns:
+        df["scope"] = "per_model"
+        base_cols = ["target", "model", "horizon", "nominal_confidence", "empirical_coverage",
+                     "mean_interval_width", "calibration_error", "n_samples"]
+        summary = df.groupby(["target", "nominal_confidence"], as_index=False).agg(
+            empirical_coverage=("empirical_coverage", "mean"),
+            mean_interval_width=("mean_interval_width", "mean"),
+            n_samples=("n_samples", "sum"),
+            calibration_error=("calibration_error", "mean"),
+        )
+        turbines = sorted(df["target"].astype(str).str.split("_").str[0].unique())
+        breakdown = []
+        for tb in turbines:
+            grp = summary[summary["target"].astype(str).str.startswith(tb + "_")]
+            if grp.empty:
+                continue
+            for _, r in grp.iterrows():
+                breakdown.append({
+                    "target": tb, "model": "ALL_MODELS", "horizon": "all",
+                    "nominal_confidence": r["nominal_confidence"],
+                    "empirical_coverage": round(r["empirical_coverage"], 4),
+                    "mean_interval_width": round(r["mean_interval_width"], 2),
+                    "calibration_error": round(abs(r["empirical_coverage"] - r["nominal_confidence"]), 4),
+                    "n_samples": int(r["n_samples"]),
+                    "scope": "per_turbine_breakdown",
+                })
+        def _conf_group(mask, label):
+            grp = summary[mask].groupby("nominal_confidence", as_index=False).agg(
+                empirical_coverage=("empirical_coverage", "mean"),
+                mean_interval_width=("mean_interval_width", "mean"),
+                n_samples=("n_samples", "sum"),
+            )
+            for _, r in grp.iterrows():
+                breakdown.append({
+                    "target": label, "model": "ALL_MODELS", "horizon": "all",
+                    "nominal_confidence": r["nominal_confidence"],
+                    "empirical_coverage": round(r["empirical_coverage"], 4),
+                    "mean_interval_width": round(r["mean_interval_width"], 2),
+                    "calibration_error": round(abs(r["empirical_coverage"] - r["nominal_confidence"]), 4),
+                    "n_samples": int(r["n_samples"]),
+                    "scope": "tb12_vs_others",
+                })
+        tb_mask = summary["target"].astype(str).str.startswith("TB12_")
+        if tb_mask.any():
+            _conf_group(tb_mask, "TB12 (all models/horizons)")
+        if (~tb_mask).any():
+            _conf_group(~tb_mask, "TB01..TB11 (all models/horizons)")
+        df = pd.concat([df, pd.DataFrame(breakdown)], ignore_index=True)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         df.to_csv(os.path.join(output_dir, "coverage_calibration.csv"), index=False)

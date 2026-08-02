@@ -345,6 +345,24 @@ def generate_data_quality_report():
             "data_source": data_source,
         })
 
+    if "farm_total_power" in processed.columns:
+        s = processed["farm_total_power"]
+        total = len(s)
+        missing = int(s.isna().sum())
+        missing_rate = round(missing / total * 100, 2) if total > 0 else 0
+        valid = s.dropna()
+        records.append({
+            "column": "farm_total_power",
+            "missing_rate_pct": missing_rate,
+            "invalid_values": int(((valid < 0) | (valid > 12 * 2200)).sum()) if len(valid) > 0 else 0,
+            "min": round(float(valid.min()), 2) if len(valid) > 0 else "",
+            "max": round(float(valid.max()), 2) if len(valid) > 0 else "",
+            "unit": "kW",
+            "remarks": "Complete" if missing_rate == 0 else "Minor gaps",
+            "definition": formula,
+            "data_source": data_source,
+        })
+
     missing_flag_cols = [c for c in processed.columns if c.endswith("_missing")]
     if missing_flag_cols:
         flag_def = "binary indicator (1=missing) from create_missing_flags() run before ffill — reflects raw gaps before imputation"
@@ -362,7 +380,9 @@ def generate_data_quality_report():
 
     out = pd.DataFrame(records)
     out.to_csv(OUT / "data_quality_report.csv", index=False)
-    logger.info(f"  data_quality_report.csv: {out.shape[0]} rows ({len(physical_cols)} physical + {1 if missing_flag_cols else 0} flag summary)")
+    logger.info(f"  data_quality_report.csv: {out.shape[0]} rows ({len(physical_cols)} turbine/sensor + "
+                f"{1 if 'farm_total_power' in processed.columns else 0} farm aggregate + "
+                f"{1 if missing_flag_cols else 0} flag summary)")
 
 
 def generate_ramp_alert(test_df):

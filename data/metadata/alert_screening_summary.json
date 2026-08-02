@@ -6,11 +6,11 @@
   "reviewer_note": "P1-05: renamed from 'fault forecast' to heuristic screening",
   "file_counts": {
     "ramp_alert": {
-      "n_rows": 381,
+      "n_rows": 221,
       "heuristic": true
     },
     "anomaly_alert": {
-      "n_rows": 769,
+      "n_rows": 1346,
       "heuristic": true
     },
     "temperature_warning": {
@@ -18,7 +18,7 @@
       "heuristic": true
     },
     "failure_risk": {
-      "n_rows": 37271,
+      "n_rows": 34360,
       "heuristic": true
     }
   }

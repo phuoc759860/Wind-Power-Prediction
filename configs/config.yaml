@@ -223,6 +223,23 @@ output:
   forecast_format: "csv"
 
 # ============================================================
+# NWP (NUMERICAL WEATHER PREDICTION) — P1-05
+# ============================================================
+# The shipped 6h/24h models are SCADA-only baselines (no weather forecasts).
+# When a real NWP CSV is provided at `path` (schema: timestamp, lead_minutes,
+# wind_speed, wind_direction, temperature) it is ingested and a SCADA-only vs
+# SCADA+NWP ablation is run and written to outputs/forecasts/nwp_ablation.csv.
+# Without a file, a deterministic STUB (perfect-forecast upper bound) is built
+# so the ingestion + ablation machinery is exercised end-to-end.
+nwp:
+  enabled: true
+  path: "data/raw/nwp_forecast.csv"
+  variables:
+    - wind_speed
+    - wind_direction
+    - temperature
+
+# ============================================================
 # LOGGING
 # ============================================================
 logging:

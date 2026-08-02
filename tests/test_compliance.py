@@ -281,6 +281,148 @@ def test_report_contains_pipeline_architecture():
     assert any("Feature Engineering" in t for t in texts)
 
 
+def _flowable_texts(items):
+    texts = []
+    for it in items:
+        t = getattr(it, "text", "")
+        if t:
+            texts.append(t)
+        elif hasattr(it, "_cellvalues"):
+            for row in it._cellvalues:
+                for cell in row:
+                    ct = getattr(cell, "text", None)
+                    if ct:
+                        texts.append(ct)
+    return texts
+
+
+def test_report_reads_data_files_not_inline_numbers():
+    """P0-06: missing-rate/frozen-data numbers must be read at generation time from
+    data_quality_report.csv + tb12_analysis.json, never restated inline."""
+    import generate_report as gr
+
+    builder = gr.ReportBuilder()
+    builder.story = []
+    builder.build_data_description()
+    builder.build_results()
+    builder.build_conclusions()
+    builder.build_review_response()
+
+    blob = "\n".join(_flowable_texts(builder.story))
+
+    stale = ["43.89", "10.76", "6.5-7.3", "12.38", "245 blocks", "13.22",
+             "84.05", "85.92", "76.43", "~44%", "~6-11"]
+    for s in stale:
+        assert s not in blob, f"stale hardcoded literal {s!r} still rendered in report"
+
+    assert builder.tb12, "tb12_analysis.json missing"
+    tb12 = builder.tb12
+    assert f"{tb12['missing_rate']}% missing data" in blob
+    assert f"{tb12['stopped_rate']}% stopped/near-zero power output" in blob
+    assert f"{tb12['frozen_data_ratio']}% frozen-data ratio" in blob
+
+    st = builder._dq_turbine_stats()
+    assert st and st["turbines"], "data_quality_report.csv turbine rows missing"
+    rates = {k: v["rate"] for k, v in st["turbines"].items() if k not in ("TB05", "TB12")}
+    lo, hi = min(rates.values()), max(rates.values())
+    assert f"Most turbines show {lo:.1f}-{hi:.1f}% missing data" in blob
+    assert f"TB05 has the highest turbine missing rate at {st['turbines']['TB05']['rate']:.2f}%" in blob
+    assert st["farm_rate"] == 0.0
+    assert f"The farm-level aggregate power column has {st['farm_rate']:.1f}% missing data" in blob
+
+    test_n = tb12["per_split"]["test"]["n_rows"]
+    assert f"({test_n:,} rows)" in blob
+    assert f"TB12 missing rate inconsistent ({st['tb12_overall']:.2f}% per-column vs " \
+           f"{tb12['missing_rate']}% test-window)" in blob
+
+
+def test_report_walk_forward_uses_actual_folds_and_std():
+    """P0-07: the report must report the actual len(folds) from walk_forward_summary.json
+    (not the requested n_folds) and must not claim 'stability' without the actual std."""
+    import generate_report as gr
+
+    builder = gr.ReportBuilder()
+    builder.story = []
+    builder.build_methodology()
+    builder.build_results()
+    builder.build_backtest_results()
+    builder.build_conclusions()
+
+    blob = "\n".join(_flowable_texts(builder.story))
+
+    wf = builder.walk_forward
+    assert wf, "walk_forward_summary.json missing"
+    actual = {int(v["n_folds"]) for v in wf.values() if "n_folds" in v}
+    assert actual, "walk_forward_summary.json has no n_folds"
+    n = max(actual)
+
+    # stale hand-copied claims must not be rendered
+    for stale in ["with 5 folds", "5-fold", "confirms baseline stability", "assesses model stability"]:
+        assert stale not in blob, f"stale walk-forward claim {stale!r} still rendered"
+
+    # actual fold count reported
+    assert f"({n}-fold, mean +/- std)" in blob
+    assert f"walk-forward validation with {n} chronological folds" in blob
+
+    # actual std is quoted, and 'stability' is explicitly not claimed
+    max_rmse = max(float(v["rmse_std"]) for v in wf.values())
+    max_r2 = max(float(v["r2_std"]) for v in wf.values())
+    assert f"{max_rmse:.1f} kW" in blob
+    assert f"{max_r2:.2f}" in blob
+    assert "'stability' is not claimed" in blob
+
+
+def test_report_turbine_and_farm_comparisons_stay_separate():
+    """P0-08: turbine-avg (metrics.csv) and farm-total (farm_metrics.csv) must be
+    reported as two separate tables and two separate conclusions; no merged
+    'XGBoost and LightGBM are within 0.01 R2' style claim may appear."""
+    import generate_report as gr
+
+    builder = gr.ReportBuilder()
+    builder.story = []
+    builder.build_executive_summary()
+    builder.build_results()
+    builder.build_conclusions()
+
+    blob = "\n".join(_flowable_texts(builder.story))
+
+    # 1. the old merged/global parity claim is gone
+    assert "XGBoost and LightGBM remain within" not in blob
+
+    # 2. no merged 'horizon x level' champion summary or mixed title remains
+    assert "per horizon \u00d7 level (min mean RMSE" not in blob
+    assert "(turbine/farm)" not in blob
+    assert "horizon \u00d7 level cells" not in blob
+
+    # 3. turbine-level parity uses the actual max gap from metrics.csv (turbine rows)
+    gap_t = builder._turbine_parity_gap()
+    assert gap_t is not None, "turbine parity gap not computable"
+    assert f"At turbine level, LightGBM and XGBoost mean R" in blob
+    assert f"differ by at most {gap_t:.3f}" in blob
+
+    # 4. farm-total parity uses the actual max gap from farm_metrics.csv
+    gap_f = builder._farm_parity_gap()
+    assert gap_f is not None, "farm parity gap not computable"
+    assert "At farm-total level, LightGBM and XGBoost R" in blob
+    assert f"differ by at most {gap_f:.3f} across horizons" in blob
+
+    # 5. champion summary is split into turbine-avg and farm-total conclusions
+    assert "turbine-avg (min mean RMSE" in blob
+    assert "farm-total (min mean RMSE" in blob
+
+    # 6. the Section 5.1 intro champion phrase is turbine-scoped and data-driven
+    tcells = builder.champions[builder.champions["level"] == "turbine"]
+    rid = int(tcells["champion"].value_counts().get("ridge", 0))
+    n = len(tcells)
+    assert f"{rid} of {n} turbine cells" in blob
+
+    # 7. farm-total champions are reported from farm_metrics.csv in Section 5.4
+    assert "Farm-total champions per horizon" in blob
+    farm_champs = builder._farm_champions()
+    assert farm_champs, "no farm champions computable from farm_metrics.csv"
+    assert "farm_metrics.csv" in blob
+
+
 def test_compliance_matrix_schema():
     repo_root = Path(__file__).parent.parent
     matrix = pd.read_csv(repo_root / "configs" / "compliance_matrix.csv", dtype=str, keep_default_na=False)
