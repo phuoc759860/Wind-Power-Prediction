@@ -1660,9 +1660,12 @@ class ReportBuilder:
 
         self.story.append(Paragraph("5.7  Alert Accuracy", s["SectionH2"]))
         self.story.append(Paragraph(
-            "Ramp event detection accuracy is evaluated using Precision, Recall, F1-score, and "
-            "False Alarm Rate (FAR). A ramp event is defined as a power change exceeding 0.5% per "
-            "minute of rated capacity.",
+            "Ramp event detection accuracy is evaluated using Precision, Recall, F1-score, "
+            "False Alarm Ratio (FDR = FP/(TP+FP)), False Alarm Rate (FPR = FP/(FP+TN)), "
+            "specificity, balanced accuracy and prevalence, with the full confusion matrix "
+            "(TP/FP/FN/TN) reported. A ramp event is defined as a power change exceeding 0.5% per "
+            "minute of rated capacity. These metrics evaluate heuristic screening consistency, "
+            "not confirmed operational fault forecasts.",
             s["BodyText2"],
         ))
         self.story.append(Paragraph(
@@ -1688,19 +1691,32 @@ class ReportBuilder:
                     f"F1={avg_f1:.3f} across all turbine-horizon-model combinations.",
                     s["BodyText2"],
                 ))
-            alert_data = [["Model", "Precision", "Recall", "F1", "FAR", "TP", "FP", "FN"]]
-            for model_name, metrics in self.alert_acc.items():
+            alert_data = [["Model", "Precision", "Recall", "F1", "FDR", "FPR", "TP", "FP", "FN", "TN"]]
+            for model_name, metrics in list(self.alert_acc.items())[:12]:
+                fdr = metrics.get("false_discovery_rate",
+                                  1.0 - metrics["precision"] if metrics.get("precision") is not None else 0.0)
                 alert_data.append([
                     model_name,
                     f"{metrics['precision']:.3f}",
                     f"{metrics['recall']:.3f}",
                     f"{metrics['f1']:.3f}",
+                    f"{fdr:.3f}",
                     f"{metrics['false_alarm_rate']:.3f}",
-                    str(metrics['tp']),
-                    str(metrics['fp']),
-                    str(metrics['fn']),
+                    str(metrics.get("tp", "")),
+                    str(metrics.get("fp", "")),
+                    str(metrics.get("fn", "")),
+                    str(metrics.get("tn", "")),
                 ])
-            self.story.append(_make_table(alert_data, col_widths=[20 * mm, 20 * mm, 20 * mm, 15 * mm, 20 * mm, 15 * mm, 15 * mm, 15 * mm]))
+            self.story.append(_make_table(
+                alert_data,
+                col_widths=[22 * mm, 16 * mm, 16 * mm, 12 * mm, 12 * mm, 12 * mm,
+                            12 * mm, 12 * mm, 12 * mm, 12 * mm]))
+            self.story.append(Paragraph(
+                "FDR = False Alarm Ratio = FP/(TP+FP); FPR = False Alarm Rate = FP/(FP+TN). "
+                "Table shows the first 12 turbine-horizon-model rows; full matrix is in "
+                "alert_accuracy.csv.",
+                s["BodyText2"],
+            ))
         self.story.append(Spacer(1, 4 * mm))
 
     def build_validation_charts(self):
@@ -2032,8 +2048,8 @@ class ReportBuilder:
             ["coverage.csv", "nominal, coverage,\nmean_width, calibration_error", f"{_get_row_count_csv('coverage.csv'):,}", "Single prediction-interval\ncoverage table (5.10)"],
 
             ["coverage_calibration.csv", "target, model, horizon,\nnominal_confidence, empirical_coverage,\nmean_interval_width, calibration_error,\nn_samples, scope", f"{_get_row_count('coverage_calibration.csv'):,}", "Per-model/per-turbine\ncoverage detail (5.10)"],
-            ["alert_accuracy.csv", "turbine_id, horizon, model,\nprecision, recall, f1,\nfalse_alarm_rate, balanced_accuracy", f"{_get_row_count('alert_accuracy.csv'):,}", "Ramp screening\naccuracy metrics"],
-            ["anomaly_accuracy.csv", "turbine_id, method,\nprecision, recall, f1,\nfalse_alarm_rate", f"{_get_row_count('anomaly_accuracy.csv'):,}", "Anomaly detection\naccuracy metrics"],
+            ["alert_accuracy.csv", "turbine_id, horizon, model,\ntp/fp/fn/tn,\nprecision, recall, f1,\nfalse_alarm_ratio, false_alarm_rate,\nspecificity, balanced_accuracy", f"{_get_row_count('alert_accuracy.csv'):,}", "Ramp screening\naccuracy metrics"],
+            ["anomaly_accuracy.csv", "turbine_id, method,\ntp/fp/fn/tn,\nprecision, recall, f1,\nfalse_alarm_ratio, false_alarm_rate", f"{_get_row_count('anomaly_accuracy.csv'):,}", "Anomaly screening\naccuracy metrics"],
             ["farm_horizon_window_check.csv", "horizon_a, horizon_b,\nn_common_samples,\nwindow_identical, window_start,\nwindow_end, r2_a_on_common,\nr2_b_on_common,\nr2_b_minus_a_on_common,\nn_at_capacity_*_common,\nn_zero_power_*_common", f"{_get_row_count('farm_horizon_window_check.csv'):,}", "Same-window horizon\nR2 comparison (P1-04)"],
         ]
         self.story.append(_make_table(output_data, col_widths=[32 * mm, 48 * mm, 15 * mm, 42 * mm]))

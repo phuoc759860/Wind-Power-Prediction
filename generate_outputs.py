@@ -817,20 +817,36 @@ def generate_alert_accuracy(test_df, models):
     results = evaluate_alert_accuracy(test_df, predictions)
     rows = []
     for key, r in results.items():
+        tp, fp, fn, tn = r["tp"], r["fp"], r["fn"], r["tn"]
+        n = tp + fp + fn + tn
         rows.append({
             "turbine_id": r["turbine_id"],
             "horizon": r["horizon"],
             "model": r["model"],
+            "method": "heuristic_screening",
+            "confirmed": False,
+            "verification_status": "SCREENING_ONLY",
             "n_actual_events": r["n_actual_events"],
             "n_predicted_events": r["n_predicted_events"],
+            "tp": tp, "fp": fp, "fn": fn, "tn": tn,
             "precision": r["precision"],
             "recall": r["recall"],
             "f1": r["f1"],
+            # False Alarm Ratio / FDR = FP/(TP+FP) = 1 - precision
+            "false_alarm_ratio": r.get("false_discovery_rate",
+                                       round(fp / (fp + tp), 4) if (fp + tp) else 0),
+            # False Alarm Rate / FPR = FP/(FP+TN)
             "false_alarm_rate": r["false_alarm_rate"],
+            "specificity": r["specificity"],
             "balanced_accuracy": r["balanced_accuracy"],
+            "prevalence": round((tp + fn) / n, 4) if n else 0,
         })
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "alert_accuracy.csv", index=False)
+    meta_path = BASE / "data" / "metadata" / "alert_accuracy.json"
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, default=str)
     logger.info(f"  alert_accuracy.csv: {df.shape[0]} rows")
 
 
@@ -841,22 +857,34 @@ def generate_anomaly_accuracy(test_df):
     results = evaluate_anomaly_detection(test_df)
     rows = []
     for tb, r in results.items():
+        tp, fp, fn, tn = r["tp"], r["fp"], r["fn"], r["tn"]
+        n = tp + fp + fn + tn
         rows.append({
             "turbine_id": tb,
             "method": r["method"],
+            "confirmed": False,
+            "verification_status": "SCREENING_ONLY",
             "n_gt_anomalies": r["n_gt_anomalies"],
             "n_detected": r["n_detected"],
+            "tp": tp, "fp": fp, "fn": fn, "tn": tn,
             "precision": r["precision"],
             "recall": r["recall"],
             "f1": r["f1"],
+            "false_alarm_ratio": r.get("false_discovery_rate",
+                                       round(fp / (fp + tp), 4) if (fp + tp) else 0),
             "false_alarm_rate": r["false_alarm_rate"],
+            "specificity": r.get("specificity", 0),
+            "balanced_accuracy": r.get("balanced_accuracy", 0),
+            "prevalence": round((tp + fn) / n, 4) if n else 0,
             "power_anomaly_precision": r.get("power_anomaly_precision", 0),
             "wind_curve_anomaly_precision": r.get("wind_curve_anomaly_precision", 0),
         })
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "anomaly_accuracy.csv", index=False)
+    meta_path = BASE / "data" / "metadata" / "anomaly_accuracy.json"
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, default=str)
     logger.info(f"  anomaly_accuracy.csv: {df.shape[0]} rows")
-
 
 def _build_predictions_and_persistence(test_df, models):
     """Predictions dict for every turbine/farm x horizon x model, plus

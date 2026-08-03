@@ -242,10 +242,30 @@ def test_alert_accuracy_evaluation():
     assert "precision" in values
     assert "recall" in values
     assert "false_alarm_rate" in values
+    assert "false_discovery_rate" in values
+    assert "tn" in values and "specificity" in values
+    tp, fp, fn, tn = values["tp"], values["fp"], values["fn"], values["tn"]
+    assert values["false_alarm_rate"] == pytest.approx(fp / (fp + tn) if (fp + tn) else 0.0, rel=1e-3)
+    assert values["false_discovery_rate"] == pytest.approx(fp / (fp + tp) if (fp + tp) else 0.0, rel=1e-3)
+    assert values["specificity"] == pytest.approx(tn / (tn + fp) if (tn + fp) else 0.0, rel=1e-3)
     assert values["precision"] >= 0.0
     assert values["recall"] >= 0.0
     assert values["n_actual_events"] >= 1
     assert values["n_predicted_events"] >= 1
+
+
+def test_alert_accuracy_csv_far_formulas():
+    """P0-07: CSV false_alarm_rate must be FPR=FP/(FP+TN); false_alarm_ratio = FDR."""
+    base = Path(__file__).parent.parent
+    df = pd.read_csv(base / "outputs" / "forecasts" / "alert_accuracy.csv")
+    assert {"tp", "fp", "fn", "tn", "false_alarm_rate", "false_alarm_ratio"} <= set(df.columns)
+    for _, row in df.iterrows():
+        tp, fp, fn, tn = row["tp"], row["fp"], row["fn"], row["tn"]
+        assert row["false_alarm_rate"] == pytest.approx(
+            fp / (fp + tn) if (fp + tn) else 0.0, rel=1e-3, abs=1e-4)
+        assert row["false_alarm_ratio"] == pytest.approx(
+            fp / (fp + tp) if (fp + tp) else 0.0, rel=1e-3, abs=1e-4)
+        assert row["verification_status"] == "SCREENING_ONLY"
 
 
 def test_tb12_analysis_reports_findings():

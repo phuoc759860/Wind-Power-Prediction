@@ -55,12 +55,16 @@ ROWS = [
      "farm_metrics.csv + farm_bias.csv + 25_farm_bias_calibration.png; "
      "evaluation farm rows now use farm rated 26400 kW; bias_kw & "
      "farm_vs_sum_turbines_kw reported"),
-    ("8", "P1-05: ramp/anomaly/failure chưa được kiểm chứng ground truth",
-     "Outputs were labelled as fault forecasts without verification.",
-     "generate_outputs.py, main.py",
-     "All alert files carry method=heuristic_screening, confirmed=False, "
-     "verification_status=SCREENING_ONLY; alert_screening_summary.json "
-     "documents the claim limits"),
+    ("8", "P1-05 / Latest P0-07: FAR terminology + screening semantics",
+     "CSV column false_alarm_rate stored FDR=1-precision instead of "
+     "FPR=FP/(FP+TN); alerts were easy to misread as confirmed fault forecasts.",
+     "src/evaluate.py, generate_outputs.py, generate_report.py, "
+     "tests/test_compliance.py",
+     "alert_accuracy.csv / anomaly_accuracy.csv now export TP/FP/FN/TN, "
+     "false_alarm_ratio (FDR), false_alarm_rate (FPR), specificity, "
+     "balanced_accuracy, prevalence, method=heuristic_screening, "
+     "confirmed=False, verification_status=SCREENING_ONLY; unit test "
+     "recomputes FAR formulas from the confusion matrix"),
     ("9", "P2-01: API thiếu bảo mật và benchmark",
      "API used a default key file and no real latency benchmark existed; the "
      "first /predict lazy-loaded models on the request path (unbounded "

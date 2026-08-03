@@ -63,10 +63,13 @@ DOCUMENTED_CSVS = {
         ["target", "model", "horizon", "nominal_confidence", "empirical_coverage",
          "mean_interval_width", "calibration_error", "n_samples", "scope"], True),
     "outputs/forecasts/alert_accuracy.csv": (
-        ["turbine_id", "horizon", "model", "precision", "recall", "f1",
-         "false_alarm_rate", "balanced_accuracy"], True),
+        ["turbine_id", "horizon", "model", "tp", "fp", "fn", "tn",
+         "precision", "recall", "f1", "false_alarm_ratio", "false_alarm_rate",
+         "specificity", "balanced_accuracy", "verification_status"], True),
     "outputs/forecasts/anomaly_accuracy.csv": (
-        ["turbine_id", "method", "precision", "recall", "f1", "false_alarm_rate"], True),
+        ["turbine_id", "method", "tp", "fp", "fn", "tn",
+         "precision", "recall", "f1", "false_alarm_ratio", "false_alarm_rate",
+         "verification_status"], True),
     "outputs/forecasts/farm_horizon_window_check.csv": (
         ["horizon_a", "horizon_b", "n_common_samples", "window_identical",
          "r2_a_on_common", "r2_b_on_common", "r2_b_minus_a_on_common"], True),

@@ -1,5 +1,5 @@
 {
-  "validated_at": "2026-08-03T14:01:52",
+  "validated_at": "2026-08-03T14:29:20",
   "report_pdf": "D:\\LEARNING\\Internship\\AMG\\Wind Power\\wind_forecasting\\outputs\\AMG_Wind_Power_Forecasting_Report_Revised.pdf",
   "status": "PASS",
   "checks": {
@@ -149,7 +149,7 @@
       "cells": 260
     },
     "tables": {
-      "pages": 49,
+      "pages": 45,
       "sections": 14
     },
     "pdf_figures": [
@@ -184,44 +184,44 @@
         "pixel_std": 54.0302
       },
       {
-        "xref": 43,
-        "page": 25,
+        "xref": 40,
+        "page": 22,
         "pixel_std": 35.8872
       },
       {
-        "xref": 45,
-        "page": 25,
+        "xref": 42,
+        "page": 22,
         "pixel_std": 40.2281
       },
       {
-        "xref": 50,
-        "page": 26,
+        "xref": 47,
+        "page": 23,
         "pixel_std": 32.5309
       },
       {
-        "xref": 54,
-        "page": 26,
+        "xref": 51,
+        "page": 23,
         "pixel_std": 33.6516
       },
       {
-        "xref": 48,
-        "page": 26,
+        "xref": 45,
+        "page": 23,
         "pixel_std": 29.5264
       },
       {
         "xref": 52,
-        "page": 26,
-        "pixel_std": 31.7713
+        "page": 23,
+        "pixel_std": 36.5026
       },
       {
-        "xref": 56,
-        "page": 27,
-        "pixel_std": 36.5026
+        "xref": 49,
+        "page": 23,
+        "pixel_std": 31.7713
       }
     ],
     "pdf": {
-      "pages": 49,
-      "text_chars": 79614
+      "pages": 45,
+      "text_chars": 73470
     }
   }
 }
