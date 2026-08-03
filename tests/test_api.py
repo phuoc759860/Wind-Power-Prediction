@@ -83,6 +83,12 @@ def test_predict_lightgbm(client):
         assert 0 <= p["predicted_power_kw"] <= 2200
         assert p["confidence_lower_kw"] <= p["predicted_power_kw"]
         assert p["predicted_power_kw"] <= p["confidence_upper_kw"]
+        assert p["selected_model"].endswith(f"_{p['horizon']}_lightgbm") or \
+            f"_target_{p['horizon']}_lightgbm" in p["selected_model"]
+        assert p["feature_version"]
+        assert p["run_id"]
+        assert p["training_cutoff"]
+        assert p["model_version"]
 
 
 def test_predict_missing_auth(client):
@@ -154,9 +160,13 @@ def test_predict_champion_registry_contract(client):
         "run_id",
         "training_cutoff",
         "quality_flag",
+        "forecast_issue_time",
+        "forecast_target_time",
     }
     assert data["selected_model"] == "TB01_power_target_10min_lightgbm"
     assert data["quality_flag"] == "PASS"
+    assert data["forecast_issue_time"]
+    assert data["forecast_target_time"]
 
 
 def test_evaluations(client):

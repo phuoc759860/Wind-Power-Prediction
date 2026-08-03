@@ -310,6 +310,37 @@ def _resolve_champion_entry(level: str, horizon: str) -> dict:
     return entry
 
 
+def _champion_model_key(level: str, horizon: str, turbine_id: Optional[str] = None) -> tuple:
+    """Return (registry_entry, deployable model_key) for a request.
+
+    Turbine registry cells store a representative TB01 artifact for the winning
+    algorithm; remap to the requested turbine so the API serves that turbine's
+    champion-family model.
+    """
+    entry = _resolve_champion_entry(level, horizon)
+    model_key = str(entry.get("model_key") or "")
+    if level == "turbine" and turbine_id:
+        alg = model_key.rsplit("_", 1)[-1] if model_key else "lightgbm"
+        model_key = f"{turbine_id}_power_target_{horizon}_{alg}"
+    return entry, model_key
+
+
+def _provenance_fields(level: str, horizon: str, model_key: str) -> dict:
+    """Attach champion-registry provenance to a prediction response."""
+    try:
+        entry = _resolve_champion_entry(level, horizon)
+    except HTTPException:
+        entry = {}
+    return {
+        "selected_model": model_key,
+        "model_version": str(entry.get("model_version") or _get_model_version(model_key)),
+        "feature_version": str(entry.get("feature_version") or "unknown"),
+        "run_id": str(entry.get("run_id") or "unknown"),
+        "training_cutoff": str(entry.get("training_cutoff") or "unknown"),
+        "quality_flag": str(entry.get("quality_flag") or "PASS"),
+    }
+
+
 def _get_model_version(key: str) -> str:
     meta = _model_registry.get(key, {})
     return meta.get("git_commit", MODEL_VERSION)[:8] if meta.get("git_commit") else MODEL_VERSION
@@ -442,6 +473,11 @@ class PredictionResult(BaseModel):
     horizon_min: int
     model_type: str
     model_version: str
+    selected_model: str = ""
+    feature_version: str = "unknown"
+    run_id: str = "unknown"
+    training_cutoff: str = "unknown"
+    quality_flag: str = "PASS"
     timestamp_issue: str
     timestamp_target: str
     predicted_power_kw: float
@@ -475,7 +511,8 @@ class ChampionPredictInput(BaseModel):
     wind_speed: float = Field(..., ge=0, le=50, examples=[8.5])
     temperature: float = Field(..., ge=-30, le=60, examples=[22.0])
     frequency: float = Field(..., ge=45, le=55, examples=[50.0])
-    power: float = Field(0, ge=0, le=RATED_POWER, examples=[1500])
+    # Farm-level power can reach 12 × rated; validate further in the endpoint.
+    power: float = Field(0, ge=0, le=RATED_POWER * 12, examples=[1500])
     power_lag1: Optional[float] = Field(None, ge=-500, le=RATED_POWER)
     power_lag6: Optional[float] = Field(None, ge=-500, le=RATED_POWER)
     hour_of_day: Optional[int] = Field(None, ge=0, le=23)
@@ -491,6 +528,8 @@ class ChampionPredictResponse(BaseModel):
     run_id: str
     training_cutoff: str
     quality_flag: str
+    forecast_issue_time: str = ""
+    forecast_target_time: str = ""
 
 
 def _build_features(data: PredictInput) -> pd.DataFrame:
@@ -617,11 +656,15 @@ def predict(data: PredictInput, request: Request):
         horizon_min = HORIZON_MINUTES[horizon]
         target_dt = datetime.now(timezone.utc) + timedelta(minutes=horizon_min)
         timestamp_target = target_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        prov = _provenance_fields("turbine", horizon, model_key)
 
         if model_key not in _model_registry:
             predictions.append(PredictionResult(
                 turbine_id=data.turbine_id, horizon=horizon, horizon_min=horizon_min,
-                model_type=model_type, model_version=MODEL_VERSION,
+                model_type=model_type, model_version=prov["model_version"],
+                selected_model=prov["selected_model"],
+                feature_version=prov["feature_version"], run_id=prov["run_id"],
+                training_cutoff=prov["training_cutoff"], quality_flag="MISSING_MODEL",
                 timestamp_issue=now_utc, timestamp_target=timestamp_target,
                 predicted_power_kw=0, confidence_lower_kw=0, confidence_upper_kw=0,
             ))
@@ -641,7 +684,10 @@ def predict(data: PredictInput, request: Request):
 
         predictions.append(PredictionResult(
             turbine_id=data.turbine_id, horizon=horizon, horizon_min=horizon_min,
-            model_type=model_type, model_version=_get_model_version(model_key),
+            model_type=model_type, model_version=prov["model_version"],
+            selected_model=prov["selected_model"],
+            feature_version=prov["feature_version"], run_id=prov["run_id"],
+            training_cutoff=prov["training_cutoff"], quality_flag=prov["quality_flag"],
             timestamp_issue=now_utc, timestamp_target=timestamp_target,
             predicted_power_kw=round(pred, 2),
             confidence_lower_kw=lo, confidence_upper_kw=hi,
@@ -666,6 +712,7 @@ def predict_farm(data: FarmPredictInput, request: Request):
         horizon_min = HORIZON_MINUTES[horizon]
         target_dt = datetime.now(timezone.utc) + timedelta(minutes=horizon_min)
         timestamp_target = target_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        prov = _provenance_fields("farm", horizon, model_key)
 
         if model_key not in _model_registry:
             continue
@@ -690,7 +737,10 @@ def predict_farm(data: FarmPredictInput, request: Request):
 
         predictions.append(PredictionResult(
             turbine_id="FARM", horizon=horizon, horizon_min=horizon_min,
-            model_type=model_type, model_version=_get_model_version(model_key),
+            model_type=model_type, model_version=prov["model_version"],
+            selected_model=prov["selected_model"],
+            feature_version=prov["feature_version"], run_id=prov["run_id"],
+            training_cutoff=prov["training_cutoff"], quality_flag=prov["quality_flag"],
             timestamp_issue=now_utc, timestamp_target=timestamp_target,
             predicted_power_kw=round(pred, 2),
             confidence_lower_kw=lo, confidence_upper_kw=hi,
@@ -711,16 +761,23 @@ def predict_champion(data: ChampionPredictInput, request: Request):
     if data.level not in {"turbine", "farm"}:
         raise HTTPException(400, f"Invalid level: {data.level}")
 
-    entry = _resolve_champion_entry(data.level, data.horizon)
-    model_key = entry.get("model_key")
+    turbine_id = data.turbine_id or "TB01"
+    if data.level == "turbine":
+        if turbine_id not in TURBINES:
+            raise HTTPException(400, f"Invalid turbine: {turbine_id}")
+        if data.power > RATED_POWER:
+            raise HTTPException(400, f"Turbine power must be <= {RATED_POWER} kW")
+    entry, model_key = _champion_model_key(data.level, data.horizon, turbine_id if data.level == "turbine" else None)
     if not model_key or model_key not in _model_registry:
         raise HTTPException(404, f"Champion model '{model_key}' not found in registry")
 
     info = _get_model(model_key)
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    horizon_min = HORIZON_MINUTES[data.horizon]
+    target_dt = datetime.now(timezone.utc) + timedelta(minutes=horizon_min)
+    timestamp_target = target_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     if data.level == "turbine":
-        turbine_id = data.turbine_id or "TB01"
-        if turbine_id not in TURBINES:
-            raise HTTPException(400, f"Invalid turbine: {turbine_id}")
         features = _build_features(PredictInput(
             turbine_id=turbine_id,
             wind_speed=data.wind_speed,
@@ -731,7 +788,7 @@ def predict_champion(data: ChampionPredictInput, request: Request):
             power_lag6=data.power_lag6,
             hour_of_day=data.hour_of_day,
             month=data.month,
-            model_type=data.model_type or "lightgbm",
+            model_type=model_key.rsplit("_", 1)[-1],
         ))
         max_power = RATED_POWER
     else:
@@ -751,15 +808,18 @@ def predict_champion(data: ChampionPredictInput, request: Request):
 
     pred = float(info["model"].predict(X)[0])
     pred = max(0, min(max_power, pred))
+    prov = _provenance_fields(data.level, data.horizon, model_key)
 
     return ChampionPredictResponse(
         prediction=round(pred, 2),
-        selected_model=entry.get("model_key", model_key),
-        model_version=entry.get("model_version") or _get_model_version(model_key),
-        feature_version=str(entry.get("feature_version") or _model_registry[model_key].get("n_features", 0)),
-        run_id=str(entry.get("run_id") or "unknown"),
-        training_cutoff=str(entry.get("training_cutoff") or "unknown"),
-        quality_flag=str(entry.get("quality_flag") or "PASS"),
+        selected_model=prov["selected_model"],
+        model_version=prov["model_version"],
+        feature_version=prov["feature_version"],
+        run_id=prov["run_id"],
+        training_cutoff=prov["training_cutoff"],
+        quality_flag=prov["quality_flag"],
+        forecast_issue_time=now_utc,
+        forecast_target_time=timestamp_target,
     )
 
 
