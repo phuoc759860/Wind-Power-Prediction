@@ -19,12 +19,12 @@ METADATA_FILES = [
     "split_statistics.json", "horizon_sample_counts.json",
     "inventory_summary.json", "tb12_analysis.json", "availability_report.json",
     "alert_screening_summary.json", "alert_accuracy.json", "anomaly_accuracy.json",
-    "walk_forward_summary.json", "leakage_audit.csv", "validation_report.json",
-    "change_log.docx",
+    "walk_forward_summary.json", "leakage_audit.csv", "leakage_audit_full.csv",
+    "validation_report.json", "change_log.docx",
 ]
 
 AUDIT_OUTPUTS = [
-    "leakage_audit_full.csv", "coverage.csv", "ablation.csv", "cv_results.csv",
+    "coverage.csv",
     "run_manifest.json", "run_manifest_verification.json",
     "report_validation.json", "validation_report.json",
 ]

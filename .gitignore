@@ -17,6 +17,7 @@ logs_pipeline_run.txt
 
 # Virtual environment
 .venv/
+.venv_fresh/
 venv/
 
 # Generated outputs (derived artifacts are committed; the >100 MB raw

@@ -20,13 +20,12 @@ REQUIRED_EVAL_COLUMNS = ["target", "model", "horizon", "mae", "rmse", "r2", "n_s
 REQUIRED_COVERAGE_COLUMNS = ["nominal", "coverage", "mean_width", "calibration_error"]
 
 REQUIRED_OUTPUT_FILES = [
-    "ablation.csv",
     "coverage.csv",
-    "cv_results.csv",
     "run_manifest.json",
     FORECAST_DIR / "coverage_calibration.csv",
     FORECAST_DIR / "data_quality_report.csv",
     FORECAST_DIR / "farm_forecast.csv",
+    FORECAST_DIR / "nwp_ablation.csv",
     FORECAST_DIR / "power_forecast.csv",
 ]
 

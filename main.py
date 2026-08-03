@@ -47,10 +47,27 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("logs/wind_forecasting.log", mode="w", encoding="utf-8"),
     ],
 )
+# File handler added after logs/ exists (see main()).
 logger = logging.getLogger(__name__)
+
+
+def _attach_file_logger(base_dir: Path) -> None:
+    log_dir = base_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    # Avoid duplicate handlers on re-entry
+    for h in list(logger.handlers):
+        if isinstance(h, logging.FileHandler):
+            logger.removeHandler(h)
+    fh = logging.FileHandler(log_dir / "wind_forecasting.log", mode="w", encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    logger.addHandler(fh)
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        if isinstance(h, logging.FileHandler):
+            root.removeHandler(h)
+    root.addHandler(fh)
 
 
 def load_config(config_path=None):
@@ -63,11 +80,12 @@ def load_config(config_path=None):
 
 def main(config_path=None, run_wf_ml=True, run_wf=True):
     start_time = time.time()
+    base_dir = Path(__file__).parent
+    _attach_file_logger(base_dir)
     logger.info("=" * 70)
     logger.info("WIND POWER FORECASTING SYSTEM - AMG WIND FARM")
     logger.info("=" * 70)
 
-    base_dir = Path(__file__).parent
     config = load_config(config_path)
 
     os.makedirs(base_dir / "data" / "processed", exist_ok=True)
@@ -414,11 +432,19 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
 
     # Fail-closed (reviewer): every configured (base_target x horizon) must have
     # produced a deployable model, otherwise the pipeline stops.
+    # train_power_models keys are "{target}_{algorithm}" (e.g. ..._xgboost).
     expected_targets = sorted({f"{bt}_target_{h['name']}"
                                for bt in base_target_cols for h in horizons})
-    missing_models = sorted(set(expected_targets) - set(all_trained_models))
+    trained_targets = {
+        key.rsplit("_", 1)[0]
+        for key in all_trained_models
+        if key.rsplit("_", 1)[-1] in {"xgboost", "lightgbm", "random_forest", "linear"}
+    }
+    missing_models = sorted(set(expected_targets) - trained_targets)
     if missing_models:
         raise RuntimeError(f"Missing trained model(s): {missing_models}")
+    logger.info("ML training coverage OK: %d targets x algorithms = %d model keys",
+                len(trained_targets), len(all_trained_models))
 
     # P1-02: persist tuning evidence when hyperparameter tuning actually runs.
     if tuning_sink is not None:
@@ -766,7 +792,7 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         generate_data_quality_report, generate_ramp_alert, generate_anomaly_alert,
         generate_failure_risk, generate_temperature_warning,
         generate_screening_summary, generate_alert_accuracy,
-        generate_anomaly_accuracy,
+        generate_anomaly_accuracy, generate_coverage_calibration,
     )
     generate_power_forecast(test_df, all_trained_models)
     generate_farm_forecast(test_df, all_trained_models)
@@ -779,6 +805,7 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     generate_screening_summary()
     generate_alert_accuracy(test_df, all_trained_models)
     generate_anomaly_accuracy(test_df)
+    generate_coverage_calibration(test_df, all_trained_models)
 
     # ============================================================
     # STEP 15: Provenance — reindex additions + auto inventory (P0-02, P1-01)

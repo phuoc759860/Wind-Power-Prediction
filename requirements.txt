@@ -16,6 +16,7 @@ PyYAML==6.0.3
 matplotlib==3.10.7
 seaborn==0.13.2
 scipy==1.16.3
+Pillow==12.3.0
 
 # Model serialization
 joblib==1.5.2
@@ -25,11 +26,14 @@ tqdm==4.69.1
 
 # Testing
 pytest==9.1.1
+httpx==0.28.1
 
 # API server
 fastapi==0.139.2
 uvicorn==0.51.0
+python-multipart==0.0.32
 
-# Report generation
+# Report generation + PDF validation
 reportlab==5.0.0
+pymupdf==1.28.0
 
