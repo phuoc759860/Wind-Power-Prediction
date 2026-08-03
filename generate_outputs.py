@@ -919,6 +919,92 @@ def generate_all():
     generate_alert_accuracy(test_df, models)
     generate_anomaly_accuracy(test_df)
     generate_coverage_calibration(test_df, models)
+    build_champion_registry()
+
+
+def build_champion_registry(output_path=None):
+    """Auto-generate champion_registry.json from evaluation_metrics.csv + model metadata.
+
+    Champion per horizon x level (turbine/farm) = deployable ML model (lightgbm or
+    xgboost) with the lowest mean RMSE across all targets of that level. ridge and
+    persistence are never championed here because they have no deployable joblib
+    artifact in models/. Returns the registry dict and writes it to output_path.
+    """
+    import json as _json
+
+    eval_path = OUT / "evaluation_metrics.csv"
+    if not eval_path.exists():
+        logger.warning("  champion_registry: evaluation_metrics.csv missing, skipping")
+        return {}
+    metrics = pd.read_csv(eval_path)
+    required = {"target", "model", "horizon", "rmse"}
+    if not required.issubset(metrics.columns):
+        logger.warning(f"  champion_registry: evaluation_metrics.csv missing columns {required}; skipping")
+        return {}
+    ml = metrics[metrics["model"].isin(["lightgbm", "xgboost"])].copy()
+    ml["level"] = ml["target"].astype(str).map(
+        lambda t: "farm" if t.lower().startswith("farm") else "turbine")
+    if ml.empty:
+        logger.warning("  champion_registry: no ML rows in evaluation_metrics.csv, skipping")
+        return {}
+
+    agg = ml.groupby(["horizon", "level", "model"], observed=True).agg(rmse=("rmse", "mean")).reset_index()
+    best = agg.loc[agg.groupby(["horizon", "level"], observed=True)["rmse"].idxmin()]
+
+    training_cutoff = "unknown"
+    split_file = BASE / "data" / "metadata" / "split_statistics.json"
+    if split_file.exists():
+        try:
+            with open(split_file, "r", encoding="utf-8") as fh:
+                training_cutoff = _json.load(fh).get("train", {}).get("timestamp_end", "unknown")
+        except Exception:
+            pass
+
+    run_id = "unknown"
+    run_file = BASE / "outputs" / "run_manifest.json"
+    if run_file.exists():
+        try:
+            with open(run_file, "r", encoding="utf-8") as fh:
+                run_id = _json.load(fh).get("run_id", "unknown")
+        except Exception:
+            pass
+
+    registry = {}
+    for _, row in best.iterrows():
+        horizon, level, alg = row["horizon"], row["level"], row["model"]
+        if level == "farm":
+            target = f"farm_total_power_target_{horizon}"
+        else:
+            target = f"TB01_power_target_{horizon}"
+        model_key = f"{target}_{alg}"
+        model_path = f"models/{model_key}_model.joblib"
+        feature_version = "unknown"
+        model_version = "unknown"
+        meta_file = BASE / "models" / f"{model_key}_metadata.json"
+        if meta_file.exists():
+            try:
+                with open(meta_file, "r", encoding="utf-8") as fh:
+                    meta = _json.load(fh)
+                feature_version = str(meta.get("n_features", "unknown"))
+                model_version = str(meta.get("git_commit", "unknown"))[:40]
+            except Exception:
+                pass
+        registry.setdefault(level, {})[horizon] = {
+            "model_key": model_key,
+            "model_path": model_path,
+            "feature_version": feature_version,
+            "model_version": model_version,
+            "run_id": run_id,
+            "training_cutoff": training_cutoff,
+            "quality_flag": "PASS",
+        }
+
+    out_path = Path(output_path) if output_path else BASE / "champion_registry.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        _json.dump(registry, fh, indent=2, sort_keys=True)
+    logger.info(f"  champion_registry.json auto-generated ({len(registry)} levels, {sum(len(v) for v in registry.values())} cells)")
+    return registry
 
 
 def generate_coverage_calibration(test_df, models):

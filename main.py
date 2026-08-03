@@ -29,7 +29,7 @@ from src.evaluate import (evaluate_all_models, generate_evaluation_report,
                           plot_tb12_distribution, analyze_farm_bias,
                           plot_farm_bias_calibration, append_baseline_rows,
                           fit_farm_bias_correction, apply_farm_bias_correction,
-                          farm_horizon_window_check)
+                          farm_horizon_window_check, compute_and_save_residual_quantiles)
 from src.predict import predict_power, create_forecast_output, add_confidence_intervals, save_forecasts
 from src.audit import (raw_file_manifest, raw_timestamp_union, timestamp_audit,
                        reindex_additions_report, leakage_audit, sample_trace,
@@ -38,6 +38,7 @@ from src.audit import (raw_file_manifest, raw_timestamp_union, timestamp_audit,
                        timestamp_audit_csv)
 from src.inventory import generate_inventory
 from src.nwp import load_nwp, build_stub_nwp, run_nwp_ablation
+from interval_calibration import save_run_manifest, write_coverage_csv_from_prediction_bundle
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,6 +74,10 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     os.makedirs(base_dir / "outputs" / "figures", exist_ok=True)
     os.makedirs(base_dir / "models", exist_ok=True)
     os.makedirs(base_dir / "logs", exist_ok=True)
+
+    run_manifest = save_run_manifest(base_dir=base_dir, config=config,
+                                     output_path=base_dir / "outputs" / "run_manifest.json")
+    logger.info(f"Run manifest saved: {run_manifest['run_id']}")
 
     # ============================================================
     # STEP 1: Load Data
@@ -486,8 +491,21 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     results_df = append_baseline_rows(results_df, test_df,
                                       persistence_preds, ridge_preds, config)
     results_df.to_csv(base_dir / "outputs" / "forecasts" / "evaluation_metrics.csv", index=False)
-    logger.info(f"evaluation_metrics.csv written: {len(results_df)} rows "
-                f"(incl. persistence + ridge baselines on same test samples)")
+    logger.info(f"evaluation_metrics.csv written: {len(results_df)} rows ")
+
+    # P1-06: champion_registry.json is auto-generated from evaluation_metrics.csv
+    # (min mean RMSE per horizon x level among deployable ML models) plus model
+    # metadata; it must never be hand-maintained.
+    from generate_outputs import build_champion_registry
+    build_champion_registry(output_path=base_dir / "champion_registry.json")
+
+    # Conformal residual quantiles for the live /predict endpoint (src/api.py
+    # loads this file; without it every CI falls back to a pred*0.08 heuristic).
+    compute_and_save_residual_quantiles(
+        test_df, predictions,
+        str(base_dir / "data" / "metadata" / "residual_quantiles.json"),
+    )
+    logger.info("residual_quantiles.json written for API conformal CIs")
 
     if not results_df.empty:
         eval_report = generate_evaluation_report(results_df, str(base_dir / "outputs" / "figures"),
@@ -653,6 +671,34 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
 
     forecast_df = create_forecast_output(test_df, predictions)
     forecast_df = add_confidence_intervals(forecast_df, all_trained_models)
+
+    # P0-05: coverage.csv must use the SAME official rows as evaluation_metrics.csv
+    # (observed, not imputed, not simulated). Slice both test_df and the prediction
+    # arrays to the official mask so the residual/coverage bands are not diluted
+    # by synthetic or imputed rows.
+    coverage_mask = pd.Series(True, index=test_df.index)
+    if all(c in test_df.columns for c in ["is_observed", "is_imputed", "is_simulated"]):
+        coverage_mask = (
+            (test_df["is_observed"].fillna(0).astype(int) == 1)
+            & (test_df["is_imputed"].fillna(0).astype(int) == 0)
+            & (test_df["is_simulated"].fillna(0).astype(int) == 0)
+        )
+    if coverage_mask.sum() == 0:
+        coverage_mask = pd.Series(True, index=test_df.index)
+    coverage_test = test_df[coverage_mask].copy()
+    coverage_predictions = {}
+    for mkey, minfo in predictions.items():
+        arr = np.asarray(minfo.get("predictions"))
+        if len(arr) != len(test_df):
+            coverage_predictions[mkey] = minfo
+            continue
+        coverage_predictions[mkey] = {**minfo, "predictions": arr[coverage_mask.values]}
+    write_coverage_csv_from_prediction_bundle(
+        coverage_test,
+        coverage_predictions,
+        output_path=base_dir / "outputs" / "coverage.csv",
+    )
+    logger.info(f"  coverage.csv written on official rows: {len(coverage_test):,} of {len(test_df):,} test rows")
     save_forecasts(forecast_df, str(base_dir / "outputs" / "forecasts"))
 
     # ============================================================

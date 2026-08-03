@@ -137,6 +137,7 @@ _model_cache: Dict[str, dict] = {}      # key -> {model, scaler, feature_cols} (
 _availability: Dict[str, dict] = {}
 _residual_quantiles: Dict[str, dict] = {}
 _ram_benchmark: dict = {}
+_champion_registry: Dict[str, dict] = {}
 # P2-01: one lock per model key so concurrent cold requests cannot double-load
 # the same artifact (thundering herd -> memory/IO pressure -> multi-second tails).
 _model_load_locks: Dict[str, threading.Lock] = {}
@@ -281,6 +282,34 @@ def _load_residual_quantiles():
         logger.info(f"Loaded residual quantiles for {len(_residual_quantiles)} groups")
 
 
+def _load_champion_registry():
+    global _champion_registry
+    path = BASE_DIR / "champion_registry.json"
+    if not path.exists():
+        _champion_registry = {}
+        logger.warning("No champion_registry.json found; champion endpoint will be unavailable")
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        _champion_registry = json.load(f)
+    logger.info(f"Loaded champion registry with levels: {sorted(_champion_registry.keys())}")
+
+
+def _resolve_champion_entry(level: str, horizon: str) -> dict:
+    if not _champion_registry:
+        _load_champion_registry()
+    if not _champion_registry:
+        raise HTTPException(503, "Champion registry not configured")
+    level_key = level.strip().lower()
+    horizon_key = horizon.strip().lower()
+    level_map = _champion_registry.get(level_key)
+    if not isinstance(level_map, dict):
+        raise HTTPException(404, f"Unknown champion level '{level}'")
+    entry = level_map.get(horizon_key)
+    if not entry:
+        raise HTTPException(404, f"No champion entry for level '{level}' and horizon '{horizon}'")
+    return entry
+
+
 def _get_model_version(key: str) -> str:
     meta = _model_registry.get(key, {})
     return meta.get("git_commit", MODEL_VERSION)[:8] if meta.get("git_commit") else MODEL_VERSION
@@ -307,6 +336,7 @@ async def lifespan(app: FastAPI):
     _scan_model_registry()
     _load_availability()
     _load_residual_quantiles()
+    _load_champion_registry()
     elapsed = time.time() - t0
     RAM_GB = None
     try:
@@ -355,7 +385,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -436,6 +466,31 @@ class FarmPredictInput(BaseModel):
 
 class FarmPredictResponse(BaseModel):
     predictions: List[PredictionResult]
+
+
+class ChampionPredictInput(BaseModel):
+    level: str = Field(..., examples=["turbine"])
+    horizon: str = Field(..., examples=["10min"])
+    turbine_id: Optional[str] = Field(None, examples=["TB01"])
+    wind_speed: float = Field(..., ge=0, le=50, examples=[8.5])
+    temperature: float = Field(..., ge=-30, le=60, examples=[22.0])
+    frequency: float = Field(..., ge=45, le=55, examples=[50.0])
+    power: float = Field(0, ge=0, le=RATED_POWER, examples=[1500])
+    power_lag1: Optional[float] = Field(None, ge=-500, le=RATED_POWER)
+    power_lag6: Optional[float] = Field(None, ge=-500, le=RATED_POWER)
+    hour_of_day: Optional[int] = Field(None, ge=0, le=23)
+    month: Optional[int] = Field(None, ge=1, le=12)
+    model_type: Optional[str] = Field("lightgbm", examples=["lightgbm"])
+
+
+class ChampionPredictResponse(BaseModel):
+    prediction: float
+    selected_model: str
+    model_version: str
+    feature_version: str
+    run_id: str
+    training_cutoff: str
+    quality_flag: str
 
 
 def _build_features(data: PredictInput) -> pd.DataFrame:
@@ -642,6 +697,70 @@ def predict_farm(data: FarmPredictInput, request: Request):
         ))
 
     return FarmPredictResponse(predictions=predictions)
+
+
+@app.post("/predict/champion", response_model=ChampionPredictResponse)
+def predict_champion(data: ChampionPredictInput, request: Request):
+    _rate_limit(request.client.host if request.client else "unknown")
+    if not _model_registry:
+        raise HTTPException(503, "No models registered")
+    if not _champion_registry:
+        _load_champion_registry()
+    if data.horizon not in HORIZONS:
+        raise HTTPException(400, f"Invalid horizon: {data.horizon}")
+    if data.level not in {"turbine", "farm"}:
+        raise HTTPException(400, f"Invalid level: {data.level}")
+
+    entry = _resolve_champion_entry(data.level, data.horizon)
+    model_key = entry.get("model_key")
+    if not model_key or model_key not in _model_registry:
+        raise HTTPException(404, f"Champion model '{model_key}' not found in registry")
+
+    info = _get_model(model_key)
+    if data.level == "turbine":
+        turbine_id = data.turbine_id or "TB01"
+        if turbine_id not in TURBINES:
+            raise HTTPException(400, f"Invalid turbine: {turbine_id}")
+        features = _build_features(PredictInput(
+            turbine_id=turbine_id,
+            wind_speed=data.wind_speed,
+            temperature=data.temperature,
+            frequency=data.frequency,
+            power=data.power,
+            power_lag1=data.power_lag1,
+            power_lag6=data.power_lag6,
+            hour_of_day=data.hour_of_day,
+            month=data.month,
+            model_type=data.model_type or "lightgbm",
+        ))
+        max_power = RATED_POWER
+    else:
+        features = pd.DataFrame([{
+            "farm_total_power": data.power,
+            "farm_avg_power": data.power / 12,
+            "farm_avg_wind_speed": data.wind_speed,
+            "hour_of_day": data.hour_of_day or 12,
+            "month": data.month or 6,
+        }])
+        max_power = RATED_POWER * 12
+
+    X = features.reindex(columns=info["feature_cols"], fill_value=0)
+    scaler = info.get("scaler")
+    if scaler is not None:
+        X = scaler.transform(X)
+
+    pred = float(info["model"].predict(X)[0])
+    pred = max(0, min(max_power, pred))
+
+    return ChampionPredictResponse(
+        prediction=round(pred, 2),
+        selected_model=entry.get("model_key", model_key),
+        model_version=entry.get("model_version") or _get_model_version(model_key),
+        feature_version=str(entry.get("feature_version") or _model_registry[model_key].get("n_features", 0)),
+        run_id=str(entry.get("run_id") or "unknown"),
+        training_cutoff=str(entry.get("training_cutoff") or "unknown"),
+        quality_flag=str(entry.get("quality_flag") or "PASS"),
+    )
 
 
 # ── Output file endpoints ─────────────────────────────────────────────────────

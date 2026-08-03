@@ -6,6 +6,7 @@ file lists.
 """
 import json
 import logging
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -81,15 +82,37 @@ def _count_api_endpoints(base_dir: Path) -> dict:
 
 
 def _count_test_cases(base_dir: Path) -> dict:
+    """Count tests collected by pytest (authoritative, reviewer P1-01).
+
+    The reviewer requires the test number to come from `pytest --collect-only`,
+    not a `def test_` line count (which under-counts parametrized cases).
+    Falls back to the line count if pytest cannot run.
+    """
+    counts = {"test_files": 0, "test_cases": 0, "source": "pytest"}
     tests_dir = base_dir / "tests"
-    counts = {"test_files": 0, "test_cases": 0}
     if not tests_dir.exists():
+        counts["source"] = "none"
         return counts
+    counts["test_files"] = len(list(tests_dir.glob("test_*.py")))
+
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["python", "-m", "pytest", "--collect-only", "-q", str(tests_dir)],
+            capture_output=True, text=True, timeout=120, cwd=str(base_dir))
+        out = proc.stdout + proc.stderr
+        m = re.search(r"(\d+)\s+test\w*\s+collected", out, re.IGNORECASE)
+        if m:
+            counts["test_cases"] = int(m.group(1))
+            return counts
+    except Exception:
+        pass
+
+    counts["source"] = "line_count"
     for p in sorted(tests_dir.glob("test_*.py")):
         text = p.read_text(encoding="utf-8", errors="ignore")
         n = len([1 for line in text.splitlines()
                  if line.strip().startswith("def test_")])
-        counts["test_files"] += 1
         counts["test_cases"] += n
     return counts
 

@@ -1,0 +1,12 @@
+{
+  "target": "farm_total_power_target_10min",
+  "shared_train_val_test_split": {
+    "train_rows": 218433,
+    "val_rows": 46807,
+    "test_rows": 46808
+  },
+  "feature150": 150,
+  "feature630": 630,
+  "results_path": "D:\\LEARNING\\Internship\\AMG\\Wind Power\\wind_forecasting\\outputs\\cv_results.csv",
+  "ablation_path": "D:\\LEARNING\\Internship\\AMG\\Wind Power\\wind_forecasting\\outputs\\ablation.csv"
+}

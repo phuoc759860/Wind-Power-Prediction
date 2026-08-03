@@ -16,6 +16,7 @@ AUDIT_EVIDENCE = [
     "tb12_analysis.json", "availability_report.json", "alert_screening_summary.json",
     "walk_forward_summary.json", "data_dictionary.csv", "column_mapping.json",
     "validation_report.json", "data_manifest.csv", "checksums.txt",
+    "residual_quantiles.json",
 ]
 
 SAMPLE_TRACES = [

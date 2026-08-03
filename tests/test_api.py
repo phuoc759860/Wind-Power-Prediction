@@ -133,6 +133,32 @@ def test_predict_invalid_turbine(client):
     assert r.status_code == 400
 
 
+def test_predict_champion_registry_contract(client):
+    r = client.post("/predict/champion", json={
+        "level": "turbine",
+        "horizon": "10min",
+        "turbine_id": "TB01",
+        "wind_speed": 8.5,
+        "temperature": 22.0,
+        "frequency": 50.0,
+        "power": 1500,
+        "model_type": "lightgbm",
+    }, headers=HEADERS)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert set(data.keys()) >= {
+        "prediction",
+        "selected_model",
+        "model_version",
+        "feature_version",
+        "run_id",
+        "training_cutoff",
+        "quality_flag",
+    }
+    assert data["selected_model"] == "TB01_power_target_10min_lightgbm"
+    assert data["quality_flag"] == "PASS"
+
+
 def test_evaluations(client):
     r = client.get("/evaluations", headers=HEADERS)
     assert r.status_code in (200, 404)

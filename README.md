@@ -27,8 +27,16 @@ wind_forecasting/
 │   ├── train_failure_model.py # Failure risk analysis
 │   ├── predict.py             # Model inference with confidence intervals
 │   └── evaluate.py            # Metrics, skill scores, summary plots
+├── app/                       # Domain packages (thin re-exports of src/*)
+│   ├── evaluation/            # Metrics, audits, official mask, leakage audit
+│   ├── training/              # Features, preprocessing, model training, prediction
+│   ├── api/                   # FastAPI service re-export
+│   └── visualization/         # Plot functions re-export
+├── evaluation/
+│   └── official_mask.py       # Canonical official-evaluation sample mask
+├── interval_calibration.py    # coverage.csv producer + run manifest
 ├── tests/
-│   ├── test_api.py            # 16 API endpoint tests
+│   ├── test_api.py            # 25 API endpoint tests
 │   └── test_wind_forecasting.py
 ├── data/
 │   ├── raw/                   # 11 SCADA Excel files (2021-2026)
@@ -152,7 +160,7 @@ All settings are in `configs/config.yaml`:
 | GET | `/health` | Server status, model count |
 | GET | `/turbines` | 12 turbines with availability data |
 | GET | `/models` | All loaded models grouped by turbine |
-| GET | `/evaluations` | 130 evaluation metric rows |
+| GET | `/evaluations` | 260 evaluation metric rows (ML + persistence + ridge) |
 | POST | `/predict` | Single turbine multi-horizon forecast |
 | POST | `/predict/farm` | Farm-wide power forecast |
 | GET | `/outputs/metrics` | Model metrics (MAE, RMSE, R2, skill score) |
@@ -162,7 +170,17 @@ All settings are in `configs/config.yaml`:
 | GET | `/outputs/anomaly-alerts` | Anomaly detection results |
 | GET | `/outputs/failure-risk` | Turbine failure risk |
 | GET | `/outputs/data-quality` | Data quality report |
+| GET | `/outputs/alert-accuracy` | Alert detection accuracy |
+| GET | `/outputs/anomaly-accuracy` | Anomaly detection accuracy |
+| GET | `/outputs/coverage-calibration` | Conformal coverage calibration |
+| GET | `/outputs/farm-metrics` | Farm-level metrics (raw + bias-corrected) |
 | GET | `/download/{filename}` | Download output CSV files |
+| GET | `/inputs` | List input files |
+| POST | `/inputs/upload` | Upload a new input file |
+| GET | `/inputs/data` | View input data rows |
+| GET | `/inputs/summary` | Input data summary |
+| PUT | `/inputs/data` | Edit/replace input data |
+| DELETE | `/inputs/{filename}` | Remove an input file |
 
 ## Compliance Matrix
 
@@ -176,8 +194,8 @@ Generated in `outputs/forecasts/`:
 |------|---------|------|-------------|
 | `power_forecast.csv` | timestamp_issue, timestamp_target, turbine_id, horizon_min, y_pred, y_low, y_high, model_version, forecast_quality | 5.6M | Per-turbine power forecasts with conformal CI |
 | `farm_forecast.csv` | timestamp_issue, timestamp_target, horizon_min, farm_power_pred, farm_power_low, farm_power_high, farm_energy_pred, forecast_quality | 468K | Aggregated farm power + energy + CI |
-| `metrics.csv` | model, turbine_id, horizon, MAE, nMAE, RMSE, nRMSE, Bias, R2, max_error, skill_score | 130 | Model performance metrics |
-| `evaluation_metrics.csv` | target, model, horizon, mae, nmae_pct, rmse, nrmse_pct, bias, r2, max_error, skill_score, n_samples | 130 | Detailed evaluation metrics |
+| `metrics.csv` | model, turbine_id, horizon, MAE, nMAE, RMSE, nRMSE, Bias, R2, max_error, skill_score | 260 | Model performance metrics |
+| `evaluation_metrics.csv` | target, model, horizon, mae, nmae_pct, rmse, nrmse_pct, bias, r2, max_error, skill_score, n_samples | 260 | Detailed evaluation metrics (ML + persistence + ridge on same samples) |
 | `farm_metrics.csv` | target, model, horizon, mae, rmse, nmae_pct, nrmse_pct, bias, r2, max_error, n_samples, n_at_capacity, n_zero_power, mae_corrected, rmse_corrected, bias_corrected, r2_corrected, correction_kind, correction_slope, correction_intercept, correction_scalar_kw | 10 | Farm-level metrics: raw vs bias-corrected (P1-04), scored on P(t+h) target |
 | `farm_bias.csv` | horizon, n_samples, actual_mean_kw, farm_model_mean_kw, bias_kw, bias_pct_rated, mae_kw, farm_vs_sum_turbines_kw | 5 | Farm direct-model vs sum-of-turbines bias (P1-04) |
 | `farm_horizon_window_check.csv` | horizon_a, horizon_b, n_common_samples, window_identical, window_start, window_end, r2_a_on_common, r2_b_on_common, r2_b_minus_a_on_common, n_at_capacity_a_common, n_at_capacity_b_common, n_zero_power_a_common, n_zero_power_b_common | 20 | Same-window/mask horizon R2 comparison (P1-04) |
@@ -187,13 +205,14 @@ Generated in `outputs/forecasts/`:
 | `anomaly_alert.csv` | timestamp, turbine_id, anomaly_score, suspected_component, evidence | 0+ | Statistical anomalies (z>3.0) |
 | `temperature_warning.csv` | timestamp, turbine_id, temperature, warning_type, severity, message | 0+ | Temperature threshold alerts |
 | `coverage_calibration.csv` | target, model, horizon, nominal_confidence, empirical_coverage, mean_interval_width, calibration_error, n_samples | 220 | Conformal CI coverage calibration |
+| `coverage.csv` | nominal, coverage, mean_width, calibration_error | 5 | Single prediction-interval coverage table; the only coverage source read by report Section 5.10 |
 
 > **Note:** on the generator fast path (`generate_outputs.py`), `skill_score`/`skill_vs_persistence` in `evaluation_metrics.csv`/`metrics.csv` are computed against a persistence baseline and are fully populated; `skill_vs_ridge` is `NaN` by design there, because ridge models are trained only in the full `main.py` pipeline.
 
 ## Testing
 
 ```bash
-# Run all 16 API tests
+# Run all 25 API tests
 python -m pytest tests/test_api.py -v
 
 # Run full test suite

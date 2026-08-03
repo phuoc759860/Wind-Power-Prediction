@@ -555,6 +555,43 @@ def test_provenance_columns_carried_through_feature_engineering():
     assert len(out) == n
 
 
+def test_official_mask_is_canonical_and_reproducible():
+    """Reviewer requirement: evaluation figures/metrics must use one canonical
+    official sample mask instead of ad hoc row filters."""
+    from evaluation.official_mask import build_official_mask, save_sample_trace
+
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=6, freq="10min"),
+        "observed_target": [1, 1, 1, 1, 1, 1],
+        "target_imputed": [0, 1, 0, 0, 0, 0],
+        "official_cutoff": [pd.Timestamp("2026-01-01 01:00:00")] * 6,
+        "prediction_available": [1, 1, 1, 0, 1, 1],
+        "feature_available": [1, 1, 1, 1, 1, 0],
+    })
+    df.loc[:, "official_cutoff"] = pd.to_datetime(df["official_cutoff"])
+
+    mask = build_official_mask(df)
+    assert isinstance(mask, pd.Series)
+    assert mask.dtype == bool
+    assert mask.tolist() == [True, False, True, False, True, False]
+
+    trace_path = Path("sample_trace.csv")
+    if trace_path.exists():
+        trace_path.unlink()
+    save_sample_trace(df, mask, trace_path)
+    assert trace_path.exists()
+    trace_df = pd.read_csv(trace_path)
+    assert list(trace_df.columns)[:6] == [
+        "timestamp",
+        "observed_target",
+        "target_imputed",
+        "official_cutoff",
+        "prediction_available",
+        "feature_available",
+    ]
+    assert len(trace_df) == 3
+
+
 def test_no_date_after_report_date_in_headline_metrics():
     """P0-01/P0-03: no date after data.report_date appears anywhere in the
     headline metrics/forecast outputs. The official evaluation window is cut at
@@ -594,3 +631,47 @@ def test_no_date_after_report_date_in_headline_metrics():
                 f"{name}:{col} contains {len(late)} timestamps after report_date "
                 f"{report_date.date()} (e.g. {late.iloc[0]}) - official metrics "
                 "must not include simulated rows")
+
+    cov_path = base / "outputs" / "coverage.csv"
+    assert cov_path.exists(), "coverage.csv missing from outputs/"
+    cov_df = pd.read_csv(cov_path)
+    for col in ["nominal", "coverage", "mean_width", "calibration_error"]:
+        assert col in cov_df.columns, f"coverage.csv missing required column: {col}"
+
+
+def test_report_figures_exist_and_have_content():
+    """P3-02: every figure referenced by the report must exist, be a non-empty
+    PNG, and cover the full horizon set — the report must fail loudly if any
+    figure is missing rather than silently dropping it."""
+    import generate_report as gr
+
+    fig_dir = Path(gr.FIG_DIR)
+    referenced = [
+        "01_performance_heatmap.png",
+        "02_horizon_decay.png",
+        "03_best_model_scatter.png",
+        "04_error_histogram.png",
+        "06_radar_summary.png",
+        "07_model_comparison.png",
+        "08_horizon_comparison.png",
+        "09_error_by_power_region.png",
+        "10_error_by_season.png",
+        "11_error_by_day_night.png",
+        "12_residual_analysis.png",
+        "13_error_by_wind_speed.png",
+        "25_farm_bias_calibration.png",
+    ]
+    for name in referenced:
+        path = fig_dir / name
+        assert path.exists(), f"report references missing figure: {name}"
+        assert path.stat().st_size > 0, f"figure is empty: {name}"
+        assert path.read_bytes()[:8].startswith(b"\x89PNG"), f"not a PNG: {name}"
+
+    # The report's _figure() must raise instead of silently dropping a missing PNG.
+    builder = gr.ReportBuilder()
+    try:
+        builder._figure("__definitely_missing__.png", "should raise")
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError("_figure() should raise FileNotFoundError for a missing PNG")

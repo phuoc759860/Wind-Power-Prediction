@@ -1,0 +1,5 @@
+model,target,n_features,mae,rmse,r2,n_samples,experiment
+persistence,farm_total_power_target_10min,150,472.0832,1031.4637,0.9748,46807,feature150
+ridge,farm_total_power_target_10min,150,768.6756,1256.7839,0.968,25843,feature150
+xgboost,farm_total_power_target_10min,150,750.422,1237.8418,0.9689,25843,feature150
+lightgbm,farm_total_power_target_10min,150,752.6379,1238.4572,0.9689,25843,feature150

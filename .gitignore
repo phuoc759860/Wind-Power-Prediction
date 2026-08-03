@@ -34,6 +34,12 @@ convert_xlsx/*
 *.tar.gz
 *.7z
 
+# Reviewer revision snapshot (regenerable; kept out of the repo)
+AMG_Wind_Forecasting_Revision/
+
+# Stray test artifact written to CWD by the official-mask unit test
+sample_trace.csv
+
 # OS
 .DS_Store
 Thumbs.db

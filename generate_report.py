@@ -25,6 +25,22 @@ FIG_DIR = BASE / "outputs" / "figures"
 META_DIR = BASE / "data" / "metadata"
 OUTPUT_PDF = BASE / "outputs" / "AMG_Wind_Power_Forecasting_Report_Revised.pdf"
 
+API_SRC = BASE / "src" / "api.py"
+
+
+def _scan_api_endpoints():
+    """All API endpoints straight from src/api.py decorators (P1-01/P3-01).
+
+    Scans get/post/put/delete so the report's endpoint table and n_api_endpoints
+    match the live app.routes count in inventory_summary.json (27 endpoints,
+    incl. PUT /inputs/data and DELETE /inputs/{filename}).
+    """
+    if not API_SRC.exists():
+        return []
+    src = API_SRC.read_text(encoding="utf-8")
+    return [(m.upper(), p)
+            for m, p in re.findall(r'@app\.(get|post|put|delete)\(["\']([^"\']+)["\']', src)]
+
 BLUE_DARK = colors.HexColor("#1F3864")
 BLUE_MED = colors.HexColor("#2F5496")
 BLUE_LIGHT = colors.HexColor("#D6E4F0")
@@ -250,10 +266,16 @@ class ReportBuilder:
         return Paragraph(f"Figure {self._fig_counter}: {text}", self.styles["Caption"])
 
     def _figure(self, name: str, caption: str, w=160 * mm, h=100 * mm):
-        """Figure + caption kept together on one page (no orphaned captions), width capped to margins."""
+        """Figure + caption kept together on one page (no orphaned captions), width capped to margins.
+
+        P3-02: a missing PNG is a hard error, not a silently dropped figure — an
+        empty report must never pass as complete.
+        """
         path = FIG_DIR / name
         if not path.exists():
-            return Spacer(1, 1)
+            raise FileNotFoundError(
+                f"Report figure {name} not found in {FIG_DIR}. "
+                "Run the pipeline (or generate_outputs.generate_figures()) before building the report.")
         if w > USABLE_WIDTH:
             w = USABLE_WIDTH
         self._fig_counter += 1
@@ -501,8 +523,7 @@ class ReportBuilder:
         api_src_path = BASE / "src" / "api.py"
         self.api_endpoint_list = []
         if api_src_path.exists():
-            src = api_src_path.read_text(encoding="utf-8")
-            self.api_endpoint_list = [("GET" if m == "get" else "POST", p) for m, p in re.findall(r'@app\.(get|post)\(["\']([^"\']+)["\']', src)]
+            self.api_endpoint_list = _scan_api_endpoints()
         self.n_api_endpoints = len(self.api_endpoint_list)
         api_test_path = BASE / "tests" / "test_api.py"
         self.n_api_tests = len(re.findall(r'^def test_', api_test_path.read_text(encoding="utf-8"), re.MULTILINE)) if api_test_path.exists() else 0
@@ -1098,7 +1119,7 @@ class ReportBuilder:
             ["Power Change", "Diff [1,3,6], Pct change [1]", "4"],
             ["Ramp Features", "Rolling ramp rate, ramp indicators", "4"],
             ["Interactions", "Wind x temperature, power per wind", "4+"],
-            ["Total per target", "-", "~150"],
+            ["Total per target", "-", "150 (ML) / 630 (Ridge)"],
         ]
         self.story.append(_make_table(feat_data, col_widths=[38 * mm, 65 * mm, 30 * mm]))
 
@@ -1773,75 +1794,63 @@ class ReportBuilder:
         self.story.append(PageBreak())
 
     def build_interval_calibration(self):
-        """Section 5.10 - empirical prediction-interval calibration (P1-04).
+        """Section 5.10 - empirical prediction-interval calibration.
 
-        The report no longer calls y_low/y_high '95% CI'. Coverage is measured empirically from
-        coverage_calibration.csv (per-model, per-turbine and TB12-vs-others scopes) and reported
-        honestly against the nominal confidence level actually configured in predict.py.
+        The report NEVER computes coverage. It reads a single pipeline artifact,
+        outputs/coverage.csv (columns nominal, coverage, mean_width,
+        calibration_error), which the forecasting pipeline writes from the official
+        evaluation mask. If the CSV is absent the report fails loudly rather than
+        silently presenting blank or recomputed numbers.
         """
         s = self.styles
         self.story.append(Paragraph("5.10  Prediction Interval Calibration", s["SectionH2"]))
-        cal_path = CSV_DIR / "coverage_calibration.csv"
-        cal_df = pd.read_csv(cal_path) if cal_path.exists() else pd.DataFrame()
-        if cal_df.empty or "empirical_coverage" not in cal_df.columns:
-            self.story.append(Paragraph(
-                "Coverage calibration could not be computed (coverage_calibration.csv missing). "
-                "The y_low/y_high bands shipped with the forecast files are therefore reported as "
-                "unverified bands, not as calibrated confidence intervals.",
-                s["BodyText2"],
-            ))
-            self.story.append(PageBreak())
-            return
+        cov_path = BASE / "outputs" / "coverage.csv"
+        required = ["nominal", "coverage", "mean_width", "calibration_error"]
+        if not cov_path.exists():
+            raise RuntimeError(
+                "Section 5.10 requires outputs/coverage.csv (the single coverage "
+                "artifact). Run the pipeline (python main.py) so the report can "
+                "read it; the report never computes coverage itself.")
+        cov_df = pd.read_csv(cov_path)
+        if cov_df.empty or not all(c in cov_df.columns for c in required):
+            raise RuntimeError(
+                f"outputs/coverage.csv must have columns {required}; found {list(cov_df.columns)}")
 
-        scope_col = cal_df["scope"].astype(str) if "scope" in cal_df.columns else pd.Series("per_model", index=cal_df.index)
-        per_model = cal_df[scope_col == "per_model"]
-        breakdown = cal_df[scope_col.isin(["per_turbine_breakdown", "tb12_vs_others"])]
-        if per_model.empty:
-            per_model = cal_df
-
-        levels = sorted(per_model["nominal_confidence"].dropna().unique())
-        rows = [["Nominal confidence", "Empirical coverage (mean)", "Calibration error"]]
-        for conf in levels:
-            sub = per_model[per_model["nominal_confidence"] == conf]
-            emp = float(sub["empirical_coverage"].mean())
-            rows.append([f"{conf:.0%}", f"{emp:.1%}", f"{abs(emp - conf):.1%}"])
+        cov_df = cov_df.sort_values("nominal")
+        rows = [["Nominal confidence", "Empirical coverage", "Mean interval width (kW)", "Calibration error"]]
+        for _, r in cov_df.iterrows():
+            rows.append([
+                f"{float(r['nominal']):.0%}",
+                f"{float(r['coverage']):.1%}",
+                f"{float(r['mean_width']):.1f}",
+                f"{float(r['calibration_error']):.1%}",
+            ])
         self.story.append(Paragraph(
             "Forecast files ship y_low/y_high prediction bands (Section 7). Instead of labeling them "
-            "'95% CI' by assumption, the pipeline measures their <b>empirical coverage</b> on the test "
-            "window for every turbine x model x horizon and each nominal confidence level actually "
-            "configured in <font color='#2F5496'>src/predict.py</font> (the shipped bands use a nominal "
-            f"confidence of {self.eval_window.get('interval_confidence', 0.9):.2f}). Coverage is defined "
-            "as the fraction of test rows whose true value falls inside [y_low, y_high]. A well-calibrated "
-            "band has empirical coverage close to its nominal level.",
+            "'95% CI' by assumption, the pipeline measures their <b>empirical coverage</b> on the "
+            "official test window and writes the single calibration table to "
+            "<font color='#2F5496'>outputs/coverage.csv</font>. This section reads only that file; it "
+            "never recomputes coverage. Coverage is defined as the fraction of official test rows whose "
+            "true value falls inside the symmetric residual band [y_pred - q, y_pred + q] at each nominal "
+            "level, where q is the empirical absolute-error quantile. A well-calibrated band has empirical "
+            "coverage close to its nominal level.",
             s["BodyText2"],
         ))
-        self.story.append(_make_table(rows, col_widths=[56 * mm, 56 * mm, 56 * mm]))
+        self.story.append(_make_table(rows, col_widths=[56 * mm, 56 * mm, 56 * mm, 56 * mm]))
 
-        worst = per_model.loc[per_model["calibration_error"].idxmax()]
-        tb12_row = breakdown[(breakdown["scope"].astype(str) == "tb12_vs_others") &
-                             breakdown["target"].astype(str).str.startswith("TB12")]
-        tb01_row = breakdown[(breakdown["scope"].astype(str) == "tb12_vs_others") &
-                             breakdown["target"].astype(str).str.startswith("TB01")]
+        row_closest = cov_df.loc[(cov_df["nominal"] - 0.95).abs().idxmin()]
+        worst = cov_df.loc[cov_df["calibration_error"].idxmax()]
         self.story.append(Paragraph(
-            f"On the official test window the intervals are <b>not yet calibrated</b> to their nominal "
-            f"level: mean empirical coverage across all targets is "
-            f"{per_model['empirical_coverage'].mean():.1%} at the nominal level that is closest to the "
-            f"shipped bands, and the largest single deviation is "
-            f"{worst['calibration_error']:.1%} ({worst['target']} / {worst['model']} / {worst['horizon']}, "
-            f"nominal {worst['nominal_confidence']:.0%} vs empirical {worst['empirical_coverage']:.1%}). "
-            + (
-                "The per-turbine breakdown shows the deviation is unevenly distributed: "
-                f"TB12 coverage is {float(tb12_row['empirical_coverage'].iloc[0]):.1%} while TB01..TB11 "
-                f"is {float(tb01_row['empirical_coverage'].iloc[0]):.1%} at nominal "
-                f"{float(tb12_row['nominal_confidence'].iloc[0]):.0%}. "
-                if not tb12_row.empty and not tb01_row.empty else ""
-            ) +
-            "Because of this, the report deliberately avoids claiming a '95% CI'; the bands are "
-            "reported as empirical coverage bands, and interval calibration (e.g. conformal/quantile "
-            "adjustment at 0.95) is listed as future work (Section 12.2). "
-            "Full detail is in "
-            "<font color='#2F5496'>outputs/forecasts/coverage_calibration.csv</font> ("
-            f"{len(cal_df):,} rows, scope = per_model / per_turbine_breakdown / tb12_vs_others).",
+            f"At the nominal level closest to the shipped bands "
+            f"({float(row_closest['nominal']):.0%}), empirical coverage is "
+            f"{float(row_closest['coverage']):.1%} with a mean band width of "
+            f"{float(row_closest['mean_width']):.1f} kW. Across all nominal levels the largest "
+            f"deviation between nominal and empirical coverage is "
+            f"{float(worst['calibration_error']):.1%} "
+            f"(nominal {float(worst['nominal']):.0%} vs empirical {float(worst['coverage']):.1%}). "
+            "Because empirical coverage is reported as measured rather than assumed, the report "
+            "deliberately avoids claiming a '95% CI'; interval calibration (e.g. conformal/quantile "
+            "adjustment at 0.95) is listed as future work (Section 12.2).",
             s["BodyText2"],
         ))
         self.story.append(PageBreak())
@@ -1939,25 +1948,37 @@ class ReportBuilder:
         self.story.append(_make_table(arch_data, col_widths=[30 * mm, 35 * mm, 75 * mm]))
 
         self.story.append(Paragraph("6.2  API Endpoints", s["SectionH2"]))
-        endpoints = [
-            ["Method", "Endpoint", "Description"],
-            ["GET", "/", "Web dashboard (HTML)"],
-            ["GET", "/health and /health/", "Server status + model count (both slash variants)"],
-            ["GET", "/turbines", "12 turbines with availability"],
-            ["GET", "/models", "All models grouped by turbine"],
-            ["GET", "/evaluations", "Evaluation metric rows"],
-            ["POST", "/predict", "Single turbine multi-horizon forecast"],
-            ["POST", "/predict/farm", "Farm-wide power forecast"],
-            ["GET", "/outputs/metrics", "Model performance metrics"],
-            ["GET", "/outputs/power-forecast", "Per-turbine predictions with CI"],
-            ["GET", "/outputs/farm-forecast", "Farm-level predictions"],
-            ["GET", "/outputs/ramp-alerts", "Ramp event detection"],
-            ["GET", "/outputs/anomaly-alerts", "Anomaly detection results"],
-            ["GET", "/outputs/failure-risk", "Turbine failure risk"],
-            ["GET", "/outputs/data-quality", "Data quality report"],
-            ["GET", "/download/{filename}", "Download output CSV files"],
-        ]
-        self.story.append(_make_table(endpoints, col_widths=[18 * mm, 45 * mm, 78 * mm]))
+        endpoint_desc = {
+            "/": "Web dashboard (HTML)",
+            "/health": "Server status + model count",
+            "/health/": "Server status + model count (trailing slash)",
+            "/turbines": "12 turbines with availability",
+            "/models": "All models grouped by turbine",
+            "/evaluations": "Evaluation metric rows",
+            "/predict": "Single turbine multi-horizon forecast",
+            "/predict/farm": "Farm-wide power forecast",
+            "/outputs/metrics": "Model performance metrics",
+            "/outputs/power-forecast": "Per-turbine predictions with CI",
+            "/outputs/farm-forecast": "Farm-level predictions",
+            "/outputs/ramp-alerts": "Ramp event detection",
+            "/outputs/anomaly-alerts": "Anomaly detection results",
+            "/outputs/failure-risk": "Turbine failure risk",
+            "/outputs/data-quality": "Data quality report",
+            "/outputs/alert-accuracy": "Alert accuracy",
+            "/outputs/anomaly-accuracy": "Anomaly accuracy",
+            "/outputs/coverage-calibration": "Conformal coverage calibration",
+            "/outputs/farm-metrics": "Farm-level metrics",
+            "/download/{filename}": "Download output CSV files",
+            "/inputs": "List input files",
+            "/inputs/upload": "Upload a new input file",
+            "/inputs/data": "View/edit input data",
+            "/inputs/summary": "Input data summary",
+        }
+        rows = [["Method", "Endpoint", "Description"]]
+        for method, path in _scan_api_endpoints():
+            rows.append([method, "/" + path if not path.startswith("/") else path,
+                         endpoint_desc.get(path, "REST endpoint")])
+        self.story.append(_make_table(rows, col_widths=[18 * mm, 45 * mm, 78 * mm]))
         self.story.append(Paragraph(
             "All endpoints except the dashboard and /health are protected: requests must carry a valid "
             "API key set in the API_KEY environment variable (the request should include an "
@@ -1986,6 +2007,14 @@ class ReportBuilder:
                     return sum(1 for _ in f) - 1
             return 0
 
+        def _get_row_count_csv(fname):
+            p = BASE / "outputs" / fname
+            if p.exists():
+                import csv
+                with open(p) as f:
+                    return sum(1 for _ in f) - 1
+            return 0
+
         output_data = [
             ["File", "Columns", "Rows", "Description"],
             ["power_forecast.csv", "timestamp_issue, timestamp_target, turbine_id,\nhorizon_min, y_pred, y_low, y_high,\nmodel_version, forecast_quality", f"{_get_row_count('power_forecast.csv'):,}", "Per-turbine power\nforecasts with empirical\ncoverage bands (5.10)"],
@@ -2000,7 +2029,9 @@ class ReportBuilder:
             ["failure_risk.csv", "timestamp, turbine_id, component,\nhorizon, stop_risk_score,\nmethod, recommended_action", f"{_get_row_count('failure_risk.csv'):,}", "Turbine failure\nrisk assessment"],
             ["anomaly_alert.csv", "timestamp, turbine_id,\nanomaly_score, suspected_component,\nevidence", f"{_get_row_count('anomaly_alert.csv'):,}", "Heuristic anomaly\nscreening (rules + z > 2.5)"],
             ["temperature_warning.csv", "timestamp, turbine_id,\ntemperature, warning_type,\nseverity, message", f"{_get_row_count('temperature_warning.csv'):,}", "Temperature threshold\nalerts"],
-            ["coverage_calibration.csv", "turbine_id, horizon, model,\nnominal_coverage,\nactual_coverage,\ncalibration_error", f"{_get_row_count('coverage_calibration.csv'):,}", "Empirical interval\ncoverage calibration\n(5.10)"],
+            ["coverage.csv", "nominal, coverage,\nmean_width, calibration_error", f"{_get_row_count_csv('coverage.csv'):,}", "Single prediction-interval\ncoverage table (5.10)"],
+
+            ["coverage_calibration.csv", "target, model, horizon,\nnominal_confidence, empirical_coverage,\nmean_interval_width, calibration_error,\nn_samples, scope", f"{_get_row_count('coverage_calibration.csv'):,}", "Per-model/per-turbine\ncoverage detail (5.10)"],
             ["alert_accuracy.csv", "turbine_id, horizon, model,\nprecision, recall, f1,\nfalse_alarm_rate, balanced_accuracy", f"{_get_row_count('alert_accuracy.csv'):,}", "Ramp screening\naccuracy metrics"],
             ["anomaly_accuracy.csv", "turbine_id, method,\nprecision, recall, f1,\nfalse_alarm_rate", f"{_get_row_count('anomaly_accuracy.csv'):,}", "Anomaly detection\naccuracy metrics"],
             ["farm_horizon_window_check.csv", "horizon_a, horizon_b,\nn_common_samples,\nwindow_identical, window_start,\nwindow_end, r2_a_on_common,\nr2_b_on_common,\nr2_b_minus_a_on_common,\nn_at_capacity_*_common,\nn_zero_power_*_common", f"{_get_row_count('farm_horizon_window_check.csv'):,}", "Same-window horizon\nR2 comparison (P1-04)"],
@@ -2130,10 +2161,7 @@ class ReportBuilder:
         api_endpoints = []
         source_path = BASE / "src" / "api.py"
         if source_path.exists():
-            import re
-            src = source_path.read_text(encoding="utf-8")
-            decorators = re.findall(r'@app\.(get|post)\(["\']([^"\']+)["\']', src)
-            api_endpoints = [("GET" if m == "get" else "POST", p) for m, p in decorators]
+            api_endpoints = _scan_api_endpoints()
 
         test_path = BASE / "tests" / "test_api.py"
         test_count = 0
@@ -2195,6 +2223,17 @@ class ReportBuilder:
                     except ValueError:
                         pass
 
+        ram_mb = "N/A"
+        bench_csv = BASE / "06_test_reports" / "api_benchmark.csv"
+        if bench_csv.exists():
+            try:
+                bdf = pd.read_csv(bench_csv)
+                ram_row = bdf[(bdf["category"] == "ram") & (bdf["metric"] == "ram_baseline_mb")]
+                if not ram_row.empty:
+                    ram_mb = f"{float(ram_row.iloc[0]['value']):.1f} MB"
+            except Exception:
+                pass
+
         bench_data = [
             ["Metric", "Value", "Note"],
             ["API Framework", "FastAPI 0.139.2", "Async ASGI (Uvicorn 0.51.0)"],
@@ -2204,7 +2243,7 @@ class ReportBuilder:
             ["Avg Model Load Time", f"{avg_load:.1f} ms" if avg_load else "N/A", "Cold-start per model"],
             ["Avg Request Latency", f"{sum(latencies)/len(latencies):.0f} ms" if latencies else "N/A", "From api_audit.log"],
             ["Min / Max Latency", f"{min(latencies):.0f} / {max(latencies):.0f} ms" if latencies else "N/A", "Across all endpoints"],
-            ["API Server RAM", "~150 MB", "With all models loaded"],
+            ["API Server RAM", ram_mb, "Measured RSS at readiness (api_benchmark.csv)"],
             ["Dashboard", "HTML5 + Chart.js", "Single-page interactive UI"],
         ]
         self.story.append(_make_table(bench_data, col_widths=[35 * mm, 35 * mm, 70 * mm]))
@@ -2529,9 +2568,10 @@ class ReportBuilder:
              "carrying all three metrics.",
              "availability_report.json, Section 3.3"],
             ["P1-04 Interval calibration honesty + TB12 breakdown",
-             "The report no longer calls y_low/y_high a '95% CI'; empirical coverage is measured per "
-             "turbine x model x horizon with per-turbine and TB12-vs-others breakdowns.",
-             "outputs/forecasts/coverage_calibration.csv (scope column), Section 5.10"],
+             "The report no longer calls y_low/y_high a '95% CI'. Empirical coverage is computed once by "
+             "the pipeline (outputs/coverage.csv, official mask) and Section 5.10 only reads that file; "
+             "per-model detail is retained in coverage_calibration.csv.",
+             "outputs/coverage.csv, outputs/forecasts/coverage_calibration.csv, Section 5.10"],
             ["P1-05 NWP ingestion + ablation",
              "NWP ingestion interface (real CSV when present, deterministic stub otherwise) merged at "
              "issue time + lead; SCADA-only vs SCADA+NWP ablation run for 6 h/24 h.",

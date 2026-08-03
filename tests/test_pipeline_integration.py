@@ -112,7 +112,22 @@ def test_anomaly_accuracy_schema(csv_cache):
         assert col in df.columns
 
 
-def test_coverage_calibration_schema(csv_cache):
+def test_coverage_csv_schema():
+    from pathlib import Path
+    import pandas as pd
+
+    path = Path(__file__).resolve().parent.parent / "outputs" / "coverage.csv"
+    if not path.exists():
+        pytest.skip()
+    df = pd.read_csv(path)
+    for col in ["nominal", "coverage", "mean_width", "calibration_error"]:
+        assert col in df.columns
+    assert df["coverage"].between(0.0, 1.0).all()
+    assert df["calibration_error"].between(0.0, 1.0).all()
+    assert (df["mean_width"].diff().dropna() >= 0).all(), "mean_width must be monotonic in nominal level"
+
+
+def test_coverage_calibration_detail_schema(csv_cache):
     df = csv_cache.get("coverage_calibration.csv")
     if df is None:
         pytest.skip()
