@@ -59,3 +59,8 @@ TB12,30min,30,TB12_power_target_30min,ridge,630,True,True,True,0,True,True,ridge
 TB12,1hour,60,TB12_power_target_1hour,ridge,630,True,True,True,0,True,True,ridge trained on features available at issue time t; target P(t+h) is created with shift(-h) and never enters X.
 TB12,6hour,360,TB12_power_target_6hour,ridge,630,True,True,True,0,True,True,ridge trained on features available at issue time t; target P(t+h) is created with shift(-h) and never enters X.
 TB12,24hour,1440,TB12_power_target_24hour,ridge,630,True,True,True,0,True,True,ridge trained on features available at issue time t; target P(t+h) is created with shift(-h) and never enters X.
+farm_total_power,10min,10,farm_total_power_target_10min,ridge,630,True,True,True,0,True,True,ridge trained on features available at issue time t; target P(t+h) is created with shift(-h) and never enters X.
+farm_total_power,30min,30,farm_total_power_target_30min,ridge,630,True,True,True,0,True,True,ridge trained on features available at issue time t; target P(t+h) is created with shift(-h) and never enters X.
+farm_total_power,1hour,60,farm_total_power_target_1hour,ridge,630,True,True,True,0,True,True,ridge trained on features available at issue time t; target P(t+h) is created with shift(-h) and never enters X.
+farm_total_power,6hour,360,farm_total_power_target_6hour,ridge,630,True,True,True,0,True,True,ridge trained on features available at issue time t; target P(t+h) is created with shift(-h) and never enters X.
+farm_total_power,24hour,1440,farm_total_power_target_24hour,ridge,630,True,True,True,0,True,True,ridge trained on features available at issue time t; target P(t+h) is created with shift(-h) and never enters X.

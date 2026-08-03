@@ -201,8 +201,9 @@ def ridge_feature_evidence(ridge_models: Dict, config: dict) -> pd.DataFrame:
 def leakage_assertions(feature_data: pd.DataFrame, ridge_models: Dict,
                        config: dict, turbines: Optional[List[str]] = None,
                        horizons: Optional[List[str]] = None,
-                       ml_models: Optional[Dict] = None) -> pd.DataFrame:
-    """Explicit P0-01 assertions per (turbine, horizon, model family) on the TEST window.
+                       ml_models: Optional[Dict] = None,
+                       include_farm: bool = True) -> pd.DataFrame:
+    """Explicit P0-01 assertions per (target, horizon, model family) on the TEST window.
 
     For each case asserts:
       1. target_column not in X.columns (feature allow-list)
@@ -213,7 +214,10 @@ def leakage_assertions(feature_data: pd.DataFrame, ridge_models: Dict,
     The checks are run on the Ridge model(s) and, when `ml_models` is provided, on
     every trained ML family (XGBoost / LightGBM) for that target, so the audit covers
     the full feature sets of all models, not only one turbine sample.
-    Returns one row per (turbine, horizon, model family) with pass/fail booleans.
+    Audited targets are the per-turbine columns (12 turbines x horizons) AND, when
+    `include_farm` is True (default), the farm_total_power targets (horizons), so
+    every trained model -- turbine and farm -- is audited (reviewer Step 3).
+    Returns one row per (target, horizon, model family) with pass/fail booleans.
     When ml_models is omitted the rows are restricted to Ridge, preserving the
     original single-row-per-case shape.
     """
@@ -223,15 +227,21 @@ def leakage_assertions(feature_data: pd.DataFrame, ridge_models: Dict,
     if turbines is None:
         turbines = config.get("turbines", {}).get("ids", [])
 
+    base_targets = [(f"{tb}_power", tb) for tb in turbines]
+    if include_farm:
+        base_targets.append(("farm_total_power", "farm_total_power"))
+
     ml_models = ml_models or {}
 
     rows = []
-    for tb in turbines:
+    for base, label in base_targets:
         for horizon in horizons:
             minutes = horizons_map.get(horizon)
             if minutes is None:
                 continue
-            target = f"{tb}_power_target_{horizon}"
+            target = f"{base}_target_{horizon}"
+            if target not in feature_data.columns:
+                continue
 
             # candidate model families for this target
             candidates = []  # (family, feature_cols, model, scaler)
@@ -247,7 +257,7 @@ def leakage_assertions(feature_data: pd.DataFrame, ridge_models: Dict,
 
             if not candidates:
                 rows.append({
-                    "turbine": tb,
+                    "turbine": label,
                     "horizon": horizon,
                     "horizon_minutes": minutes,
                     "target_column": target,
@@ -294,7 +304,7 @@ def leakage_assertions(feature_data: pd.DataFrame, ridge_models: Dict,
                     assert4 = None
 
                 rows.append({
-                    "turbine": tb,
+                    "turbine": label,
                     "horizon": horizon,
                     "horizon_minutes": minutes,
                     "target_column": target,
@@ -310,6 +320,23 @@ def leakage_assertions(feature_data: pd.DataFrame, ridge_models: Dict,
                              "target P(t+h) is created with shift(-h) and never enters X."),
                 })
     return pd.DataFrame(rows)
+
+
+def run_leakage_audit(feature_data: pd.DataFrame, ridge_models: Dict,
+                      config: dict, ml_models: Optional[Dict] = None) -> pd.DataFrame:
+    """Run the full per-model leakage assertion table and fail closed.
+
+    Audits every trained model (turbine + farm, Ridge/XGBoost/LightGBM) via
+    leakage_assertions and raises RuntimeError if any model fails an assertion,
+    mirroring the pipeline's fail-closed policy (reviewer Step 6). Returns the
+    assertion table on success.
+    """
+    full = leakage_assertions(feature_data, ridge_models, config, ml_models=ml_models)
+    n_fail = int((~full["all_passed"]).sum()) if not full.empty else 0
+    if n_fail:
+        raise RuntimeError(f"P1-01 leakage assertions failed: "
+                           f"{n_fail} of {len(full)} models")
+    return full
 
 
 def write_sample_traces(feature_data: pd.DataFrame, ridge_models: Dict,

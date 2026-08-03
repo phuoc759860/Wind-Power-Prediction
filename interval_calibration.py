@@ -10,6 +10,11 @@ import pandas as pd
 AVAILABLE_HORIZONS = ["10min", "30min", "1hour", "6hour", "24hour"]
 DEFAULT_NOMINAL_LEVELS = (0.5, 0.8, 0.9, 0.95, 0.99)
 
+# Files written as part of provenance that must NOT perturb the output hash,
+# otherwise the manifest's own output_hash becomes a self-referential
+# fixed-point and can never be verified against the directory it describes.
+MANIFEST_EXCLUDE_FILES = {"run_manifest.json", "run_manifest_verification.json"}
+
 
 def _safe_predictions(
     predictions: Mapping[str, Mapping[str, object]] | Sequence[Mapping[str, object]],
@@ -170,19 +175,31 @@ def _default_coverage_path(base_dir: str | Path = ".") -> Path:
     return Path(base_dir) / "outputs" / "coverage.csv"
 
 
-def build_run_manifest(base_dir: str | Path = ".", config: Mapping | None = None) -> dict:
-    """Generate a deterministic provenance manifest for a single run."""
+def build_run_manifest(base_dir: str | Path = ".",
+                       config: Mapping | None = None,
+                       run_id: str | None = None,
+                       timestamp: str | None = None) -> dict:
+    """Generate a deterministic provenance manifest for a single run.
+
+    run_id/timestamp are preserved across the run (written at start, re-saved
+    with final hashes at the end) so the finished manifest still identifies the
+    original invocation. output_hash excludes the manifest files themselves so
+    the hash can be recomputed and compared by verify_run_manifest.
+    """
     base_dir = Path(base_dir)
     import hashlib
     import platform
     import subprocess
 
-    def _hash_path(path: Path) -> str:
+    def _hash_path(path: Path, exclude: set | None = None) -> str:
+        exclude = exclude or set()
         hasher = hashlib.sha256()
         for file_path in sorted(path.rglob("*")):
             if not file_path.is_file():
                 continue
             rel = str(file_path.relative_to(path)).replace("\\", "/")
+            if rel in exclude:
+                continue
             hasher.update(rel.encode("utf-8"))
             with file_path.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(65536), b""):
@@ -211,23 +228,88 @@ def build_run_manifest(base_dir: str | Path = ".", config: Mapping | None = None
         packages = {}
 
     manifest = {
-        "run_id": f"run-{pd.Timestamp.utcnow().strftime('%Y%m%dT%H%M%SZ')}",
+        "run_id": run_id or f"run-{pd.Timestamp.utcnow().strftime('%Y%m%dT%H%M%SZ')}",
         "git_commit": _git_commit(),
         "config_hash": hashlib.sha256(json.dumps(config or {}, sort_keys=True).encode("utf-8")).hexdigest(),
         "seed": int((config or {}).get("seed", 0)),
         "python": _python_version(),
         "packages": packages,
         "data_hash": _hash_path(base_dir / "data"),
-        "output_hash": _hash_path(base_dir / "outputs"),
-        "timestamp": pd.Timestamp.utcnow().isoformat(),
+        "output_hash": _hash_path(base_dir / "outputs", exclude=MANIFEST_EXCLUDE_FILES),
+        "timestamp": timestamp or pd.Timestamp.utcnow().isoformat(),
     }
     return manifest
 
 
-def save_run_manifest(base_dir: str | Path = ".", config: Mapping | None = None, output_path: str | Path = "outputs/run_manifest.json") -> dict:
-    manifest = build_run_manifest(base_dir=base_dir, config=config)
+def save_run_manifest(base_dir: str | Path = ".", config: Mapping | None = None,
+                      output_path: str | Path = "outputs/run_manifest.json",
+                      run_id: str | None = None,
+                      timestamp: str | None = None) -> dict:
+    manifest = build_run_manifest(base_dir=base_dir, config=config,
+                                  run_id=run_id, timestamp=timestamp)
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
     return manifest
+
+
+def verify_run_manifest(manifest_path: str | Path = "outputs/run_manifest.json",
+                        base_dir: str | Path = ".",
+                        config: Mapping | None = None,
+                        output_path: str | Path | None = None,
+                        strict: bool = True) -> dict:
+    """Recompute every reproducible manifest field and compare it against the
+    current files/environment. Writes a verification report (reviewer evidence)
+    and, in strict mode, raises RuntimeError on the first failing field."""
+    manifest_path = Path(manifest_path)
+    base_dir = Path(base_dir)
+    if not manifest_path.exists():
+        raise RuntimeError(f"run_manifest.json not found at {manifest_path}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    current = build_run_manifest(
+        base_dir=base_dir,
+        config=config,
+        run_id=manifest.get("run_id"),
+        timestamp=manifest.get("timestamp"),
+    )
+
+    def _check(field: str, expected, actual) -> dict:
+        return {"field": field, "expected": expected, "actual": actual,
+                "match": bool(expected == actual)}
+
+    run_id = manifest.get("run_id")
+    checks = [
+        {"field": "run_id",
+         "expected": "well-formed run-* id",
+         "actual": run_id,
+         "match": bool(isinstance(run_id, str) and run_id.startswith("run-") and len(run_id) > 4)},
+        _check("git_commit", current["git_commit"], manifest.get("git_commit")),
+        _check("config_hash", current["config_hash"], manifest.get("config_hash")),
+        _check("seed", current["seed"], manifest.get("seed")),
+        _check("python", current["python"], manifest.get("python")),
+        _check("packages", current["packages"], manifest.get("packages")),
+        _check("data_hash", current["data_hash"], manifest.get("data_hash")),
+        _check("output_hash", current["output_hash"], manifest.get("output_hash")),
+    ]
+
+    failed = [c for c in checks if not c["match"]]
+    report = {
+        "verified_at": pd.Timestamp.utcnow().isoformat(),
+        "manifest_path": str(manifest_path),
+        "status": "PASS" if not failed else "FAIL",
+        "checks": checks,
+    }
+
+    if output_path:
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, sort_keys=True)
+
+    if strict and failed:
+        names = ", ".join(c["field"] for c in failed)
+        raise RuntimeError(f"Run manifest verification FAILED: {names}")
+
+    return report

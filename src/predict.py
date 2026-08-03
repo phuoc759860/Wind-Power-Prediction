@@ -17,6 +17,11 @@ def predict_with_model(model_info: dict, X: pd.DataFrame) -> np.ndarray:
     valid_cols = [c for c in feature_cols if c in X.columns]
     X_pred = X[valid_cols].fillna(0)
 
+    # Symmetric with prepare_features (train_power_model.py): feature
+    # engineering can emit +/-inf (e.g. pct_change from a 0-power row); they
+    # must be dropped to 0 before scaling/predicting or the model call raises.
+    X_pred = X_pred.replace([np.inf, -np.inf], np.nan).fillna(0)
+
     if scaler is not None:
         X_pred = scaler.transform(X_pred.values)
 

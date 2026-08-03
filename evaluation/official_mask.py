@@ -53,6 +53,46 @@ def build_official_mask(df: pd.DataFrame) -> pd.Series:
     return _ensure_bool_series(mask, len(df))
 
 
+def add_official_mask_columns(df: pd.DataFrame, evaluation_cutoff=None) -> pd.DataFrame:
+    """Attach the five official-mask columns to a DataFrame if absent.
+
+    Derives them from the pipeline's provenance flags so the canonical
+    build_official_mask() applies everywhere evaluation runs (reviewer:
+    no ad-hoc df[df.target.notna()] filters).
+      observed_target     <- is_observed (default 1)
+      target_imputed      <- is_imputed  (default 0)
+      official_cutoff     <- evaluation_cutoff, else min timestamp of
+                             is_simulated rows, else max timestamp (keep all)
+      prediction_available<- 1 (callers AND with ~isnan(pred) separately)
+      feature_available   <- 1
+    """
+    out = df.copy()
+    if "observed_target" not in out.columns:
+        out["observed_target"] = (
+            out["is_observed"].astype(int) if "is_observed" in out.columns else 1
+        )
+    if "target_imputed" not in out.columns:
+        out["target_imputed"] = (
+            out["is_imputed"].fillna(0).astype(int) if "is_imputed" in out.columns else 0
+        )
+    if "official_cutoff" not in out.columns:
+        if evaluation_cutoff is not None:
+            out["official_cutoff"] = pd.Timestamp(evaluation_cutoff)
+        elif "timestamp" in out.columns and "is_simulated" in out.columns and (out["is_simulated"].fillna(0) == 1).any():
+            ts = pd.to_datetime(out["timestamp"])
+            out["official_cutoff"] = ts[out["is_simulated"].fillna(0) == 1].min()
+        elif "timestamp" in out.columns:
+            ts = pd.to_datetime(out["timestamp"])
+            out["official_cutoff"] = ts.max() + pd.Timedelta(seconds=1)
+        else:
+            out["official_cutoff"] = pd.Timestamp.max
+    if "prediction_available" not in out.columns:
+        out["prediction_available"] = 1
+    if "feature_available" not in out.columns:
+        out["feature_available"] = 1
+    return out
+
+
 def save_sample_trace(df: pd.DataFrame, mask: pd.Series | np.ndarray | Iterable[bool], output_path: str | Path = "sample_trace.csv") -> pd.DataFrame:
     """Persist the reviewer-visible row inclusion/exclusion trace.
 

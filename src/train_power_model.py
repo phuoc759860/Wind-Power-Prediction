@@ -526,6 +526,7 @@ def save_models(trained_models: Dict, output_dir: str, config: Optional[dict] = 
             "model_key": model_key,
             "model_type": model_info.get("model_name", type(model_info["model"]).__name__),
             "n_features": len(model_info["feature_cols"]),
+            "feature_version": (config or {}).get("features", {}).get("version", "unknown"),
             "seed": seed,
             "python_version": python_version,
             "git_commit": git_commit,

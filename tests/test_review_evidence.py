@@ -161,6 +161,108 @@ def test_leakage_assertions_pass_on_clean_ridge():
     assert row["all_passed"]
 
 
+def test_leakage_assertions_audit_farm_models():
+    from sklearn.linear_model import Ridge
+    from sklearn.preprocessing import StandardScaler
+    from src.audit import leakage_assertions
+
+    n = 60
+    power = (np.sin(np.arange(n) / 5.0) * 300 + 1200).round(1)
+    feature_data = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="10min"),
+        "TB01_power": power,
+        "farm_total_power": power * 12,
+    })
+    feature_data["TB01_power_target_10min"] = power
+    feature_data["farm_total_power_target_10min"] = power * 12
+
+    def _fit(px):
+        X = px.values[:-1]
+        return Ridge(alpha=1.0).fit(X, px.values[1:]), StandardScaler().fit(X)
+
+    m1, s1 = _fit(feature_data[["TB01_power"]])
+    mf, sf = _fit(feature_data[["farm_total_power"]])
+    ridge_models = {
+        "TB01_power_target_10min": (m1, s1, ["TB01_power"]),
+        "farm_total_power_target_10min": (mf, sf, ["farm_total_power"]),
+    }
+    config = {"turbines": {"ids": ["TB01"]},
+              "forecasting": {"horizons": [{"name": "10min", "steps": 1}]}}
+
+    la = leakage_assertions(feature_data, ridge_models, config)
+    farm = la[la["turbine"] == "farm_total_power"]
+    assert len(farm) == 1
+    assert farm.iloc[0]["target_column"] == "farm_total_power_target_10min"
+    assert farm.iloc[0]["assert_target_not_in_X"]
+    assert farm.iloc[0]["all_passed"]
+
+    la_turbine_only = leakage_assertions(feature_data, ridge_models, config,
+                                         include_farm=False)
+    assert "farm_total_power" not in la_turbine_only["turbine"].tolist()
+    assert la_turbine_only.iloc[0]["turbine"] == "TB01"
+
+
+class _DummyReg:
+    def __init__(self, value=123.0):
+        self._value = value
+
+    def predict(self, X):
+        return np.full(X.shape[0], self._value)
+
+
+def _synthetic_audit_inputs(leak_model_key=None):
+    turbines = [f"TB{i:02d}" for i in range(1, 13)]
+    horizons = [{"name": "10min", "steps": 1}, {"name": "30min", "steps": 3},
+                {"name": "1hour", "steps": 6}, {"name": "6hour", "steps": 36},
+                {"name": "24hour", "steps": 144}]
+    n = 120
+    rng = np.random.default_rng(0)
+    cols = {"timestamp": pd.date_range("2026-01-01", periods=n, freq="10min")}
+    for tb in turbines:
+        cols[f"{tb}_power"] = rng.normal(1200, 300, n).round(1)
+    cols["farm_total_power"] = sum(cols[f"{tb}_power"] for tb in turbines)
+    feature_data = pd.DataFrame(cols)
+    base_targets = [f"{tb}_power" for tb in turbines] + ["farm_total_power"]
+    for base in base_targets:
+        for h in horizons:
+            feature_data[f"{base}_target_{h['name']}"] = feature_data[base].shift(-h["steps"])
+
+    ridge_models = {}
+    ml_models = {}
+    for base in base_targets:
+        for h in horizons:
+            target = f"{base}_target_{h['name']}"
+            ridge_models[target] = (_DummyReg(), None, [base])
+            for fam in ["xgboost", "lightgbm"]:
+                key = f"{target}_{fam}"
+                fcols = [base]
+                if leak_model_key == key:
+                    fcols.append(target)
+                ml_models[key] = {"model": _DummyReg(), "scaler": None,
+                                  "feature_cols": fcols}
+    config = {"turbines": {"ids": turbines}, "forecasting": {"horizons": horizons}}
+    return feature_data, ridge_models, config, ml_models
+
+
+def test_leakage_audit_covers_all_195_models():
+    from src.audit import run_leakage_audit
+
+    feature_data, ridge_models, config, ml_models = _synthetic_audit_inputs()
+    results = run_leakage_audit(feature_data, ridge_models, config, ml_models=ml_models)
+    assert len(results) == 195
+    assert (results["turbine"] == "farm_total_power").sum() == 15
+    assert results["all_passed"].all()
+
+
+def test_future_feature_detection_raises():
+    from src.audit import run_leakage_audit
+
+    feature_data, ridge_models, config, ml_models = _synthetic_audit_inputs(
+        leak_model_key="farm_total_power_target_10min_lightgbm")
+    with pytest.raises(RuntimeError, match="leakage assertions failed"):
+        run_leakage_audit(feature_data, ridge_models, config, ml_models=ml_models)
+
+
 def test_preprocessing_sets_provenance_flags():
     from src.preprocessing import preprocess_pipeline
 
@@ -592,6 +694,98 @@ def test_official_mask_is_canonical_and_reproducible():
     assert len(trace_df) == 3
 
 
+def test_official_mask_columns_derived_from_provenance_flags():
+    """Reviewer Step: the pipeline never writes the five official-mask columns,
+    so they must be derived from the provenance flags. An imputed row and a
+    simulated (>= cutoff) row must be excluded by the derived official mask."""
+    from evaluation.official_mask import (
+        REQUIRED_MASK_COLUMNS,
+        add_official_mask_columns,
+        build_official_mask,
+    )
+
+    n = 4
+    ts = pd.date_range("2026-01-01", periods=n, freq="10min")
+    df = pd.DataFrame({
+        "timestamp": ts,
+        "TB01_power": np.linspace(0, 1200, n),
+        "is_observed": [1, 1, 1, 1],
+        "is_synthetic": [0, 0, 0, 0],
+        "is_imputed": [0, 1, 0, 0],
+        "is_simulated": [0, 0, 1, 1],
+    })
+
+    out = add_official_mask_columns(df)
+    for col in REQUIRED_MASK_COLUMNS:
+        assert col in out.columns
+
+    # simulated rows (ts >= cutoff) set official_cutoff = earliest simulated ts
+    cutoff = ts[2]
+    assert pd.to_datetime(out["official_cutoff"].iloc[0]) == cutoff
+    assert (out["observed_target"] == 1).all()
+    assert out["target_imputed"].tolist() == [0, 1, 0, 0]
+
+    mask = build_official_mask(out)
+    assert mask.tolist() == [True, False, False, False]
+
+    # explicit cutoff wins over the simulated-derived one
+    out2 = add_official_mask_columns(df, evaluation_cutoff=ts[1])
+    mask2 = build_official_mask(out2)
+    assert mask2.tolist() == [True, False, False, False]
+
+
+def test_official_mask_used_in_farm_metrics_and_evaluation():
+    """Reviewer Step: every evaluation path (incl. farm metrics) must use the
+    official mask, not ad-hoc filters. Imputed/simulated rows must be dropped
+    from farm-level metrics rows."""
+    from src.evaluate import compute_farm_level_metrics, _official_eval_mask
+
+    n = 6
+    ts = pd.date_range("2026-01-01", periods=n, freq="10min")
+    test_df = pd.DataFrame({
+        "timestamp": ts,
+        "TB01_power": np.linspace(0, 1200, n),
+        "TB02_power": np.linspace(0, 1000, n),
+        "farm_total_power_target_10min": np.linspace(0, 2200, n),
+        "is_observed": [1, 1, 1, 1, 1, 1],
+        "is_synthetic": [0, 0, 0, 0, 0, 0],
+        "is_imputed": [0, 1, 0, 0, 0, 0],
+        "is_simulated": [0, 0, 0, 1, 1, 1],
+    })
+    farm_vals = np.linspace(100, 2100, n)
+    predictions = {
+        "farm_total_power_target_10min_lightgbm": {
+            "model_name": "lightgbm",
+            "target": "farm_total_power_target_10min",
+            "predictions": farm_vals,
+        }
+    }
+    config = {"rated_power": {"turbine": 1000.0, "farm": 26400.0}}
+
+    mask = _official_eval_mask(test_df, n)
+    assert mask.tolist() == [True, False, True, False, False, False]
+
+    farm_df = compute_farm_level_metrics(test_df, predictions, config)
+    assert not farm_df.empty
+    row = farm_df.iloc[0]
+    assert row["target"] == "farm_total_power_target_10min"
+    assert row["n_samples"] == 2
+
+
+def test_official_mask_derivation_rejects_missing_cutoff_cleanly():
+    """If neither a simulated flag nor a cutoff is derivable, evaluation must not
+    raise - it keeps all rows rather than silently dropping them."""
+    from src.evaluate import _official_eval_mask
+
+    n = 4
+    test_df = pd.DataFrame({
+        "TB01_power": np.linspace(0, 1200, n),
+        "is_observed": [1, 1, 1, 1],
+    })
+    mask = _official_eval_mask(test_df, n)
+    assert mask.tolist() == [True, True, True, True]
+
+
 def test_no_date_after_report_date_in_headline_metrics():
     """P0-01/P0-03: no date after data.report_date appears anywhere in the
     headline metrics/forecast outputs. The official evaluation window is cut at
@@ -675,3 +869,218 @@ def test_report_figures_exist_and_have_content():
         pass
     else:
         raise AssertionError("_figure() should raise FileNotFoundError for a missing PNG")
+
+
+def test_validate_outputs_passes_on_real_artifacts():
+    """Reviewer: validate_outputs.py must assert evaluation_metrics.csv exists,
+    contain >0 metric rows, and every figure must be a non-empty file."""
+    import validate_outputs as vo
+
+    metrics_path = vo._resolve_metrics_path()
+    assert metrics_path.exists()
+    metrics = pd.read_csv(metrics_path)
+    assert len(metrics) > 0
+    for col in vo.REQUIRED_EVAL_COLUMNS:
+        assert col in metrics.columns
+
+    figures = vo.validate_figures()
+    assert len(figures) > 0
+    assert all(f.stat().st_size > 0 for f in figures)
+
+    vo.validate_coverage()
+    vo.validate_champion_registry()
+    report = vo.main()
+    assert report["status"] == "PASS"
+    assert (Path(vo.OUT) / "validation_report.json").exists()
+
+
+def test_validate_outputs_raises_on_empty_figure(tmp_path, monkeypatch):
+    import validate_outputs as vo
+
+    empty_fig = tmp_path / "01_performance_heatmap.png"
+    empty_fig.write_bytes(b"")
+    monkeypatch.setattr(vo, "FIG_DIR", tmp_path)
+
+    with pytest.raises(AssertionError, match="st_size == 0"):
+        vo.validate_figures()
+
+
+def test_validate_outputs_raises_on_missing_metrics(tmp_path, monkeypatch):
+    import validate_outputs as vo
+
+    monkeypatch.setattr(vo, "FORECAST_DIR", tmp_path)
+    monkeypatch.setattr(vo, "OUT", tmp_path)
+
+    with pytest.raises(AssertionError, match="Missing evaluation_metrics.csv"):
+        vo.validate_metrics()
+
+
+def test_validate_outputs_raises_on_empty_metrics(tmp_path, monkeypatch):
+    import validate_outputs as vo
+
+    (tmp_path / "evaluation_metrics.csv").write_text("target,model\n", encoding="utf-8")
+    monkeypatch.setattr(vo, "FORECAST_DIR", tmp_path)
+    monkeypatch.setattr(vo, "OUT", tmp_path)
+
+    with pytest.raises(AssertionError, match="is empty"):
+        vo.validate_metrics()
+
+
+def _make_manifest_fixture(tmp_path):
+    """Minimal base_dir with data/ and outputs/ trees for manifest tests."""
+    from interval_calibration import save_run_manifest
+
+    data_dir = tmp_path / "data" / "processed"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "processed_data.parquet").write_bytes(b"scada-bytes")
+
+    out_dir = tmp_path / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "coverage.csv").write_text("nominal,coverage\n0.95,0.94\n", encoding="utf-8")
+
+    config = {"seed": 42, "data": {"report_date": "2026-07-03"}}
+    manifest_path = out_dir / "run_manifest.json"
+    save_run_manifest(base_dir=tmp_path, config=config, output_path=manifest_path,
+                      run_id="run-test-000000")
+    return tmp_path, config, manifest_path
+
+
+def test_build_run_manifest_contains_provenance_fields(tmp_path):
+    from interval_calibration import build_run_manifest
+
+    config = {"seed": 42}
+    m = build_run_manifest(base_dir=tmp_path, config=config, run_id="run-test-000000")
+    for key in ["run_id", "git_commit", "config_hash", "seed", "python",
+                "packages", "data_hash", "output_hash", "timestamp"]:
+        assert key in m, f"manifest missing {key}"
+    assert m["run_id"] == "run-test-000000"
+    assert m["seed"] == 42
+    assert m["git_commit"] in ("unknown", m["git_commit"])
+    assert isinstance(m["packages"], dict) and len(m["packages"]) > 0
+
+
+def test_verify_run_manifest_passes_on_matching_state(tmp_path):
+    from interval_calibration import verify_run_manifest
+
+    base, config, manifest_path = _make_manifest_fixture(tmp_path)
+    report = verify_run_manifest(manifest_path=manifest_path, base_dir=base,
+                                 config=config)
+    assert report["status"] == "PASS"
+    assert all(c["match"] for c in report["checks"])
+
+
+def test_verify_run_manifest_raises_on_tampered_data_hash(tmp_path):
+    from interval_calibration import verify_run_manifest
+
+    base, config, manifest_path = _make_manifest_fixture(tmp_path)
+    (base / "data" / "processed" / "processed_data.parquet").write_bytes(b"tampered")
+
+    with pytest.raises(RuntimeError, match="data_hash"):
+        verify_run_manifest(manifest_path=manifest_path, base_dir=base, config=config)
+
+
+def test_verify_run_manifest_raises_on_tampered_seed(tmp_path):
+    import json
+
+    from interval_calibration import verify_run_manifest
+
+    base, config, manifest_path = _make_manifest_fixture(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["seed"] = 999
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="seed"):
+        verify_run_manifest(manifest_path=manifest_path, base_dir=base, config=config)
+
+
+def test_verify_run_manifest_raises_on_missing_manifest(tmp_path):
+    from interval_calibration import verify_run_manifest
+
+    with pytest.raises(RuntimeError, match="not found"):
+        verify_run_manifest(manifest_path=tmp_path / "nope.json", base_dir=tmp_path)
+
+
+def test_validate_report_passes_on_real_report():
+    """Reviewer: validate_report.py must check every figure/CSV/metric, no
+    missing tables, no blank figures — and must pass on the real artifacts."""
+    import validate_report as vr
+
+    figures = vr.validate_figures()
+    assert len(figures) == len(vr._referenced_figures()) >= 10
+
+    csvs = vr.validate_csvs()
+    assert len(csvs) == len(vr.DOCUMENTED_CSVS) >= 15
+
+    metrics = vr.validate_metrics()
+    assert metrics["cells"] > 0
+
+    assert vr.REPORT_PDF.exists()
+    doc = vr.pymupdf.open(str(vr.REPORT_PDF))
+    text = "\n".join(p.get_text() for p in doc)
+    assert vr.validate_pdf_tables(doc, text)["sections"] >= 10
+    assert len(vr.validate_pdf_figures(doc)) >= len(vr._referenced_figures())
+
+    report = vr.main()
+    assert report["status"] == "PASS"
+    assert (Path(vr.BASE) / "outputs" / "report_validation.json").exists()
+
+
+def test_validate_report_raises_on_missing_figure(tmp_path, monkeypatch):
+    import validate_report as vr
+
+    monkeypatch.setattr(vr, "FIG_DIR", tmp_path)
+    with pytest.raises(AssertionError, match="missing figure"):
+        vr.validate_figures()
+
+
+def test_validate_report_raises_on_blank_figure(tmp_path, monkeypatch):
+    import numpy as np
+    from PIL import Image as PILImage
+
+    import validate_report as vr
+
+    for name in vr._referenced_figures():
+        (tmp_path / name).write_bytes(b"")
+    (tmp_path / "01_performance_heatmap.png").write_bytes(
+        PILImage.new("RGB", (12, 12), (255, 255, 255)).tobytes())
+
+    monkeypatch.setattr(vr, "FIG_DIR", tmp_path)
+    with pytest.raises(AssertionError, match="empty|blank|Not a PNG"):
+        vr.validate_figures()
+
+
+def test_validate_report_raises_on_missing_csv(tmp_path, monkeypatch):
+    import validate_report as vr
+
+    monkeypatch.setattr(vr, "DOCUMENTED_CSVS",
+                        {"outputs/forecasts/__missing__.csv": (["a"], True)})
+    with pytest.raises(AssertionError, match="missing CSV"):
+        vr.validate_csvs()
+
+
+def test_validate_report_raises_on_blank_csv(tmp_path, monkeypatch):
+    import validate_report as vr
+
+    blank_dir = tmp_path / "outputs" / "forecasts"
+    blank_dir.mkdir(parents=True, exist_ok=True)
+    blank = blank_dir / "blank.csv"
+    blank.write_text("", encoding="utf-8")
+    monkeypatch.setattr(vr, "BASE", tmp_path)
+    monkeypatch.setattr(vr, "DOCUMENTED_CSVS",
+                        {"outputs/forecasts/blank.csv": (["a"], True)})
+    with pytest.raises(AssertionError, match="blank CSV"):
+        vr.validate_csvs()
+
+
+def test_validate_report_raises_on_missing_metric_cells(tmp_path, monkeypatch):
+    import validate_report as vr
+
+    partial = tmp_path / "evaluation_metrics.csv"
+    partial.write_text(
+        "target,model,horizon,mae,rmse,bias,r2,n_samples,skill_score,"
+        "skill_vs_persistence,skill_vs_ridge\n"
+        "TB01_power_target_10min,lightgbm,10min,1,2,3,0.9,10,0,0,0\n",
+        encoding="utf-8")
+    monkeypatch.setattr(vr, "CSV_DIR", tmp_path)
+    with pytest.raises(AssertionError, match="missing metric cells"):
+        vr.validate_metrics()

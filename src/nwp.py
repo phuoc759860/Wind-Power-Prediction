@@ -159,8 +159,7 @@ def run_nwp_ablation(train_df: pd.DataFrame, val_df: pd.DataFrame,
     for base_target, horizon in cases:
         target = f"{base_target}_target_{horizon}"
         if target not in train_df.columns:
-            logger.warning(f"  NWP ablation: target {target} missing, skipping")
-            continue
+            raise RuntimeError(f"NWP ablation: target {target} missing from training data")
         lead_min = steps_map.get(horizon, 0)
 
         for label, with_nwp in [("scada_only", False), ("scada_plus_nwp", True)]:
@@ -173,7 +172,9 @@ def run_nwp_ablation(train_df: pd.DataFrame, val_df: pd.DataFrame,
             X_tr, y_tr, fcols = prepare_features(train_in, target)
             X_te, y_te, _ = prepare_features(test_in, target, fcols)
             if len(X_tr) < 100 or len(X_te) < 10:
-                continue
+                raise RuntimeError(
+                    f"NWP ablation: insufficient samples for {target} "
+                    f"(train={len(X_tr)}, test={len(X_te)})")
 
             scaler = StandardScaler().fit(X_tr.values)
             model = Ridge(alpha=1.0).fit(scaler.transform(X_tr.values), y_tr.values)

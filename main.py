@@ -34,11 +34,13 @@ from src.predict import predict_power, create_forecast_output, add_confidence_in
 from src.audit import (raw_file_manifest, raw_timestamp_union, timestamp_audit,
                        reindex_additions_report, leakage_audit, sample_trace,
                        horizon_valid_samples, ridge_feature_evidence,
-                       leakage_assertions, write_sample_traces, write_checksums,
+                       leakage_assertions, run_leakage_audit,
+                       write_sample_traces, write_checksums,
                        timestamp_audit_csv)
 from src.inventory import generate_inventory
 from src.nwp import load_nwp, build_stub_nwp, run_nwp_ablation
-from interval_calibration import save_run_manifest, write_coverage_csv_from_prediction_bundle
+from interval_calibration import (save_run_manifest, write_coverage_csv_from_prediction_bundle,
+                                  verify_run_manifest)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,7 +122,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         write_checksums(raw_dir, str(base_dir / "data" / "metadata" / "checksums.txt"))
         logger.info("timestamp_audit.csv + checksums.txt written (P0-02 evidence)")
     except Exception as e:
-        logger.warning(f"Raw manifest/coverage audit failed: {e}")
+        logger.error(f"Raw manifest/coverage audit failed: {e}")
+        raise
 
     # P0-01: official evaluation window. Cut at min(report_date, raw_union_end).
     # Any row at/after this cutoff is flagged is_simulated=1 in preprocessing
@@ -138,7 +141,9 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         logger.info(f"P0-01 evaluation cutoff = min(report_date={report_date}, "
                     f"raw_union_end={raw_end if raw_ts is not None else 'N/A'}) = {evaluation_cutoff}")
     else:
-        logger.warning("No data.report_date in config; evaluation window not cut (P0-01)")
+        raise RuntimeError(
+            "data.report_date missing in config (P0-01): the official evaluation "
+            "window cannot be established without a report date")
 
     # ============================================================
     # STEP 2: Column Mapping
@@ -379,9 +384,14 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     tuning_sink = {"records": [], "best_params": {}} if config.get("training", {}).get("tuning", {}).get("enabled", False) else None
 
     turbine_ids = config.get("turbines", {}).get("ids", [])
-    base_target_cols = [f"{tid}_power" for tid in turbine_ids if f"{tid}_power" in train_df.columns]
+    missing_turbine_cols = [f"{tid}_power" for tid in turbine_ids
+                            if f"{tid}_power" not in train_df.columns]
+    if missing_turbine_cols:
+        raise RuntimeError(f"Missing turbine power columns in training data: {missing_turbine_cols}")
+    base_target_cols = [f"{tid}_power" for tid in turbine_ids]
+    if "farm_total_power" not in train_df.columns:
+        raise RuntimeError("Missing farm_total_power column in training data")
     base_target_cols.append("farm_total_power")
-    base_target_cols = [c for c in base_target_cols if c in train_df.columns]
 
     horizons = config.get("forecasting", {}).get("horizons", [])
 
@@ -391,8 +401,7 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
             target = f"{base_target}_target_{h_name}"
 
             if target not in train_df.columns:
-                logger.warning(f"Target {target} not found in training data, skipping")
-                continue
+                raise RuntimeError(f"Missing target {target} in training data")
 
             try:
                 results, models = train_power_models(train_df, val_df, target, config,
@@ -401,6 +410,15 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
                 all_trained_models.update(models)
             except Exception as e:
                 logger.error(f"Error training models for {target}: {e}")
+                raise
+
+    # Fail-closed (reviewer): every configured (base_target x horizon) must have
+    # produced a deployable model, otherwise the pipeline stops.
+    expected_targets = sorted({f"{bt}_target_{h['name']}"
+                               for bt in base_target_cols for h in horizons})
+    missing_models = sorted(set(expected_targets) - set(all_trained_models))
+    if missing_models:
+        raise RuntimeError(f"Missing trained model(s): {missing_models}")
 
     # P1-02: persist tuning evidence when hyperparameter tuning actually runs.
     if tuning_sink is not None:
@@ -419,6 +437,7 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
                         f"best_params.json ({len(tuning_sink['best_params'])} targets)")
         except Exception as e:
             logger.error(f"Tuning persistence failed: {e}")
+            raise
 
     if all_trained_models:
         seed = config.get("training", {}).get("random_state", 42)
@@ -469,6 +488,13 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
 
     predictions = predict_power(test_df, all_trained_models, config)
 
+    # Fail-closed: every trained model must produce a prediction array, or the
+    # pipeline stops (a silently dropped model would corrupt evaluation).
+    missing_pred = sorted(k for k in all_trained_models
+                          if k not in predictions or predictions[k].get("predictions") is None)
+    if missing_pred:
+        raise RuntimeError(f"Missing predictions for trained model(s): {missing_pred}")
+
     # P1-04: fit farm bias correction on the VALIDATION split, apply to test.
     val_predictions = predict_power(val_df, all_trained_models, config)
     farm_bias_params = fit_farm_bias_correction(val_df, val_predictions, config)
@@ -497,7 +523,10 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     # (min mean RMSE per horizon x level among deployable ML models) plus model
     # metadata; it must never be hand-maintained.
     from generate_outputs import build_champion_registry
-    build_champion_registry(output_path=base_dir / "champion_registry.json")
+    registry = build_champion_registry(output_path=base_dir / "champion_registry.json")
+    if not registry:
+        raise RuntimeError("Champion registry empty: no champion could be selected "
+                           "from evaluation_metrics.csv")
 
     # Conformal residual quantiles for the live /predict endpoint (src/api.py
     # loads this file; without it every CI falls back to a pred*0.08 heuristic).
@@ -520,7 +549,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         logger.info(f"Sample trace written: {len(trace)} rows "
                     f"(issue t -> features at t -> target P(t+24h) -> model predictions)")
     except Exception as e:
-        logger.warning(f"Sample trace failed: {e}")
+        logger.error(f"Sample trace failed: {e}")
+        raise
 
     try:
         traces = write_sample_traces(feature_data, ridge_models, all_trained_models, config,
@@ -531,7 +561,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         for p in traces:
             logger.info(f"Sample trace written: {p}")
     except Exception as e:
-        logger.warning(f"Additional sample traces failed: {e}")
+        logger.error(f"Additional sample traces failed: {e}")
+        raise
 
     # P0-01 explicit assertion table (target not in X, alignment, not allclose).
     # Extended to every ML family (XGBoost/LightGBM) and every turbine (P1-01).
@@ -547,15 +578,13 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         raise
 
     try:
-        leak_full = leakage_assertions(feature_data, ridge_models, config,
-                                       ml_models=all_trained_models)
+        leak_full = run_leakage_audit(feature_data, ridge_models, config,
+                                      ml_models=all_trained_models)
         leak_full.to_csv(base_dir / "data" / "metadata" / "leakage_audit_full.csv", index=False)
         n_fail_full = int((~leak_full["all_passed"]).sum())
         n_ml_rows = int((leak_full["model"] != "ridge").sum()) if not leak_full.empty else 0
         logger.info(f"Full leakage assertions (Ridge + ML): {len(leak_full)} cases "
                     f"({n_ml_rows} ML rows, {n_fail_full} failed)")
-        if n_fail_full:
-            raise RuntimeError(f"P1-01 assertion failed: {n_fail_full} (turbine, horizon, model) cases")
     except Exception as e:
         logger.error(f"Full leakage assertions failed: {e}")
         raise
@@ -583,7 +612,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
                 logger.info(f"  Farm bias {row['horizon']:6s}: bias={row['bias_kw']} kW "
                             f"({row['bias_pct_rated']}% rated), farm_vs_sum={row['farm_vs_sum_turbines_kw']} kW")
     except Exception as e:
-        logger.warning(f"Farm bias analysis failed: {e}")
+        logger.error(f"Farm bias analysis failed: {e}")
+        raise
 
     # P1-04: same-window horizon comparison (24h vs 6h R2 artifact check).
     try:
@@ -597,7 +627,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
                                 f"n_common={row['n_common_samples']} R2_6h={row['r2_a_on_common']} "
                                 f"R2_24h={row['r2_b_on_common']} (delta={row['r2_b_minus_a_on_common']})")
     except Exception as e:
-        logger.warning(f"Farm horizon window check failed: {e}")
+        logger.error(f"Farm horizon window check failed: {e}")
+        raise
 
     # P1-05: NWP ingestion interface + SCADA-only vs SCADA+NWP ablation.
     # The shipped 6h/24h models are SCADA-only; this makes that explicit and
@@ -623,7 +654,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
                 logger.info(f"  {row['feature_set']:15s} {row['target']} {row['horizon']:6s}: "
                             f"R2={row['r2']:.4f} RMSE={row['rmse_kw']:.1f} kW")
     except Exception as e:
-        logger.warning(f"NWP ablation failed: {e}")
+        logger.error(f"NWP ablation failed: {e}")
+        raise
 
     # TB12 specific analysis
     logger.info("\n" + "-" * 50)
@@ -676,15 +708,12 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     # (observed, not imputed, not simulated). Slice both test_df and the prediction
     # arrays to the official mask so the residual/coverage bands are not diluted
     # by synthetic or imputed rows.
-    coverage_mask = pd.Series(True, index=test_df.index)
-    if all(c in test_df.columns for c in ["is_observed", "is_imputed", "is_simulated"]):
-        coverage_mask = (
-            (test_df["is_observed"].fillna(0).astype(int) == 1)
-            & (test_df["is_imputed"].fillna(0).astype(int) == 0)
-            & (test_df["is_simulated"].fillna(0).astype(int) == 0)
-        )
+    from evaluation.official_mask import add_official_mask_columns, build_official_mask
+    coverage_mask = build_official_mask(add_official_mask_columns(test_df))
     if coverage_mask.sum() == 0:
-        coverage_mask = pd.Series(True, index=test_df.index)
+        raise RuntimeError(
+            "Coverage failed: the official mask excluded every test row "
+            "(all observed/imputed/simulated/availability flags are off)")
     coverage_test = test_df[coverage_mask].copy()
     coverage_predictions = {}
     for mkey, minfo in predictions.items():
@@ -722,11 +751,8 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
     logger.info(f"Summary visualizations saved to {fig_dir}")
 
     from generate_outputs import generate_figures
-    try:
-        generate_figures()
-        logger.info("Additional evaluation figures generated")
-    except Exception as e:
-        logger.warning(f"Could not generate additional figures: {e}")
+    generate_figures()
+    logger.info("Additional evaluation figures generated")
 
     # ============================================================
     # STEP 14: Generate all doc Section 15 output files
@@ -768,12 +794,39 @@ def main(config_path=None, run_wf_ml=True, run_wf=True):
         logger.info(f"  Reindex additions: {reidx['n_synthetic_rows_reindexed']} synthetic rows "
                     f"({reidx['synthetic_ratio_pct']}% of processed) added by 10-min resampling")
     except Exception as e:
-        logger.warning(f"  Reindex report failed: {e}")
+        logger.error(f"  Reindex report failed: {e}")
+        raise
 
-    try:
-        generate_inventory(base_dir)
-    except Exception as e:
-        logger.warning(f"  Inventory generation failed: {e}")
+    generate_inventory(base_dir)
+
+    # ============================================================
+    # STEP 16: Run Manifest — final snapshot + automatic verification
+    # ============================================================
+    logger.info("\n" + "=" * 60)
+    logger.info("STEP 16: RUN MANIFEST VERIFICATION")
+    logger.info("=" * 60)
+
+    manifest_path = base_dir / "outputs" / "run_manifest.json"
+    run_id = None
+    if manifest_path.exists():
+        run_id = json.loads(manifest_path.read_text(encoding="utf-8")).get("run_id")
+
+    # Re-save so data_hash/output_hash reflect the FINAL pipeline state while
+    # preserving the original run_id recorded when the run started.
+    final_manifest = save_run_manifest(base_dir=base_dir, config=config,
+                                       output_path=manifest_path, run_id=run_id)
+    logger.info(f"Run manifest finalised: {final_manifest['run_id']}")
+
+    verification = verify_run_manifest(
+        manifest_path=manifest_path,
+        base_dir=base_dir,
+        config=config,
+        output_path=base_dir / "outputs" / "run_manifest_verification.json",
+    )
+    n_ok = sum(1 for c in verification["checks"] if c["match"])
+    logger.info(f"Run manifest verification {verification['status']}: "
+                f"{n_ok}/{len(verification['checks'])} checks passed "
+                f"(outputs/run_manifest_verification.json)")
 
     # ============================================================
     # SUMMARY

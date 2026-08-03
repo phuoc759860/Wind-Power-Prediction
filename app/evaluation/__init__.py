@@ -47,7 +47,11 @@ from src.split_time_series import (  # noqa: F401
     split_by_time,
     walk_forward_split,
 )
-from evaluation.official_mask import build_official_mask, save_sample_trace  # noqa: F401
+from evaluation.official_mask import (  # noqa: F401
+    add_official_mask_columns,
+    build_official_mask,
+    save_sample_trace,
+)
 from app.validation.leakage_audit import (  # noqa: F401
     audit_model,
     build_full_leakage_audit,
@@ -91,6 +95,7 @@ __all__ = [
     "split_by_time",
     "walk_forward_split",
     # masks
+    "add_official_mask_columns",
     "build_official_mask",
     "save_sample_trace",
     # leakage audit

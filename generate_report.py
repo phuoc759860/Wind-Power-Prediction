@@ -2223,6 +2223,12 @@ class ReportBuilder:
                     except ValueError:
                         pass
 
+        def _pct(vals, q):
+            if not vals:
+                return 0.0
+            s = sorted(vals)
+            return s[min(int(q * len(s)), len(s) - 1)]
+
         ram_mb = "N/A"
         bench_csv = BASE / "06_test_reports" / "api_benchmark.csv"
         if bench_csv.exists():
@@ -2241,11 +2247,21 @@ class ReportBuilder:
             ["Total Endpoints", str(len(api_endpoints)), "Documented in OpenAPI"],
             ["Test Count", str(test_count), "API + input management"],
             ["Avg Model Load Time", f"{avg_load:.1f} ms" if avg_load else "N/A", "Cold-start per model"],
-            ["Avg Request Latency", f"{sum(latencies)/len(latencies):.0f} ms" if latencies else "N/A", "From api_audit.log"],
-            ["Min / Max Latency", f"{min(latencies):.0f} / {max(latencies):.0f} ms" if latencies else "N/A", "Across all endpoints"],
+        ]
+        if latencies:
+            bench_data.extend([
+                ["Latency P50", f"{_pct(latencies, 0.50):.0f} ms", "50th percentile, from api_audit.log"],
+                ["Latency P95", f"{_pct(latencies, 0.95):.0f} ms", "95th percentile, from api_audit.log"],
+                ["Latency P99", f"{_pct(latencies, 0.99):.0f} ms", "99th percentile, from api_audit.log"],
+                ["Latency Max", f"{max(latencies):.0f} ms", "Worst single request across all endpoints"],
+                ["Latency Min", f"{min(latencies):.0f} ms", "Fastest single request across all endpoints"],
+            ])
+        else:
+            bench_data.append(["Request Latency", "N/A", "No entries in api_audit.log"])
+        bench_data.extend([
             ["API Server RAM", ram_mb, "Measured RSS at readiness (api_benchmark.csv)"],
             ["Dashboard", "HTML5 + Chart.js", "Single-page interactive UI"],
-        ]
+        ])
         self.story.append(_make_table(bench_data, col_widths=[35 * mm, 35 * mm, 70 * mm]))
         self.story.append(PageBreak())
 

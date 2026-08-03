@@ -1,0 +1,227 @@
+{
+  "validated_at": "2026-08-03T14:01:52",
+  "report_pdf": "D:\\LEARNING\\Internship\\AMG\\Wind Power\\wind_forecasting\\outputs\\AMG_Wind_Power_Forecasting_Report_Revised.pdf",
+  "status": "PASS",
+  "checks": {
+    "figures": [
+      {
+        "figure": "01_performance_heatmap.png",
+        "size": 223690,
+        "pixel_std": 60.8659
+      },
+      {
+        "figure": "02_horizon_decay.png",
+        "size": 264063,
+        "pixel_std": 36.0208
+      },
+      {
+        "figure": "03_best_model_scatter.png",
+        "size": 880257,
+        "pixel_std": 35.8872
+      },
+      {
+        "figure": "04_error_histogram.png",
+        "size": 108651,
+        "pixel_std": 40.2281
+      },
+      {
+        "figure": "06_radar_summary.png",
+        "size": 92378,
+        "pixel_std": 30.3344
+      },
+      {
+        "figure": "07_model_comparison.png",
+        "size": 51230,
+        "pixel_std": 69.9751
+      },
+      {
+        "figure": "08_horizon_comparison.png",
+        "size": 79127,
+        "pixel_std": 54.0302
+      },
+      {
+        "figure": "09_error_by_power_region.png",
+        "size": 60741,
+        "pixel_std": 31.7713
+      },
+      {
+        "figure": "10_error_by_season.png",
+        "size": 44478,
+        "pixel_std": 33.6516
+      },
+      {
+        "figure": "11_error_by_day_night.png",
+        "size": 47688,
+        "pixel_std": 36.5026
+      },
+      {
+        "figure": "12_residual_analysis.png",
+        "size": 279539,
+        "pixel_std": 29.5264
+      },
+      {
+        "figure": "13_error_by_wind_speed.png",
+        "size": 42537,
+        "pixel_std": 32.5309
+      },
+      {
+        "figure": "25_farm_bias_calibration.png",
+        "size": 285590,
+        "pixel_std": 32.5628
+      }
+    ],
+    "csvs": [
+      {
+        "csv": "outputs/forecasts/power_forecast.csv",
+        "rows": 23640
+      },
+      {
+        "csv": "outputs/forecasts/farm_forecast.csv",
+        "rows": 1970
+      },
+      {
+        "csv": "outputs/forecasts/evaluation_metrics.csv",
+        "rows": 260
+      },
+      {
+        "csv": "outputs/forecasts/farm_bias.csv",
+        "rows": 5
+      },
+      {
+        "csv": "outputs/forecasts/sample_trace_TB02_24hour.csv",
+        "rows": 500
+      },
+      {
+        "csv": "outputs/forecasts/metrics.csv",
+        "rows": 260
+      },
+      {
+        "csv": "outputs/forecasts/farm_metrics.csv",
+        "rows": 10
+      },
+      {
+        "csv": "outputs/forecasts/data_quality_report.csv",
+        "rows": 50
+      },
+      {
+        "csv": "outputs/forecasts/ramp_alert.csv",
+        "rows": 221
+      },
+      {
+        "csv": "outputs/forecasts/failure_risk.csv",
+        "rows": 34360
+      },
+      {
+        "csv": "outputs/forecasts/anomaly_alert.csv",
+        "rows": 1346
+      },
+      {
+        "csv": "outputs/forecasts/temperature_warning.csv",
+        "rows": 0
+      },
+      {
+        "csv": "outputs/coverage.csv",
+        "rows": 5
+      },
+      {
+        "csv": "outputs/forecasts/coverage_calibration.csv",
+        "rows": 960
+      },
+      {
+        "csv": "outputs/forecasts/alert_accuracy.csv",
+        "rows": 120
+      },
+      {
+        "csv": "outputs/forecasts/anomaly_accuracy.csv",
+        "rows": 12
+      },
+      {
+        "csv": "outputs/forecasts/farm_horizon_window_check.csv",
+        "rows": 20
+      },
+      {
+        "csv": "outputs/forecasts/nwp_ablation.csv",
+        "rows": 10
+      }
+    ],
+    "metrics": {
+      "evaluation_rows": 260,
+      "cells": 260
+    },
+    "tables": {
+      "pages": 49,
+      "sections": 14
+    },
+    "pdf_figures": [
+      {
+        "xref": 20,
+        "page": 15,
+        "pixel_std": 60.8659
+      },
+      {
+        "xref": 23,
+        "page": 16,
+        "pixel_std": 36.0208
+      },
+      {
+        "xref": 27,
+        "page": 17,
+        "pixel_std": 69.9751
+      },
+      {
+        "xref": 29,
+        "page": 17,
+        "pixel_std": 30.3344
+      },
+      {
+        "xref": 33,
+        "page": 19,
+        "pixel_std": 32.5628
+      },
+      {
+        "xref": 37,
+        "page": 21,
+        "pixel_std": 54.0302
+      },
+      {
+        "xref": 43,
+        "page": 25,
+        "pixel_std": 35.8872
+      },
+      {
+        "xref": 45,
+        "page": 25,
+        "pixel_std": 40.2281
+      },
+      {
+        "xref": 50,
+        "page": 26,
+        "pixel_std": 32.5309
+      },
+      {
+        "xref": 54,
+        "page": 26,
+        "pixel_std": 33.6516
+      },
+      {
+        "xref": 48,
+        "page": 26,
+        "pixel_std": 29.5264
+      },
+      {
+        "xref": 52,
+        "page": 26,
+        "pixel_std": 31.7713
+      },
+      {
+        "xref": 56,
+        "page": 27,
+        "pixel_std": 36.5026
+      }
+    ],
+    "pdf": {
+      "pages": 49,
+      "text_chars": 79614
+    }
+  }
+}

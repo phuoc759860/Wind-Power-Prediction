@@ -1,0 +1,30 @@
+{
+  "validated_at": "2026-08-03T14:01:47",
+  "status": "PASS",
+  "checks": {
+    "evaluation_metrics.csv": {
+      "exists": true,
+      "rows": 260,
+      "columns": [
+        "target",
+        "model",
+        "horizon",
+        "mae",
+        "rmse",
+        "r2",
+        "n_samples"
+      ]
+    },
+    "figures": {
+      "count": 32,
+      "all_non_empty": true
+    },
+    "coverage.csv": {
+      "exists": true,
+      "rows": 5
+    },
+    "champion_registry.json": {
+      "exists": true
+    }
+  }
+}

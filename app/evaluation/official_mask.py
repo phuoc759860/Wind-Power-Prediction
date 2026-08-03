@@ -9,8 +9,14 @@ from __future__ import annotations
 
 from evaluation.official_mask import (  # noqa: F401
     REQUIRED_MASK_COLUMNS,
+    add_official_mask_columns,
     build_official_mask,
     save_sample_trace,
 )
 
-__all__ = ["REQUIRED_MASK_COLUMNS", "build_official_mask", "save_sample_trace"]
+__all__ = [
+    "REQUIRED_MASK_COLUMNS",
+    "add_official_mask_columns",
+    "build_official_mask",
+    "save_sample_trace",
+]

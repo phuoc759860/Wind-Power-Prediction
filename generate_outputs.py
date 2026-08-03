@@ -567,6 +567,14 @@ def generate_temperature_warning(test_df):
         df["method"] = "heuristic_screening"
         df["confirmed"] = False
         df["verification_status"] = "SCREENING_ONLY"
+    else:
+        # Always persist the documented schema, even when no warning fires, so
+        # the artifact is never a blank/unparseable file (reviewer: no blank
+        # outputs). Columns match the Section 7 output-files table.
+        df = pd.DataFrame(columns=[
+            "timestamp", "turbine_id", "temperature", "warning_type",
+            "severity", "message", "method", "confirmed", "verification_status",
+        ])
     df.to_csv(OUT / "temperature_warning.csv", index=False)
     logger.info(f"  temperature_warning.csv: {df.shape[0]} rows (heuristic screening, not confirmed faults)")
 
@@ -985,8 +993,15 @@ def build_champion_registry(output_path=None):
             try:
                 with open(meta_file, "r", encoding="utf-8") as fh:
                     meta = _json.load(fh)
-                feature_version = str(meta.get("n_features", "unknown"))
+                feature_version = str(meta.get("feature_version", "unknown"))
                 model_version = str(meta.get("git_commit", "unknown"))[:40]
+            except Exception:
+                pass
+        if feature_version == "unknown":
+            try:
+                with open(BASE / "configs" / "config.yaml", "r", encoding="utf-8") as fh:
+                    cfg = yaml.safe_load(fh)
+                feature_version = str((cfg or {}).get("features", {}).get("version", "unknown"))
             except Exception:
                 pass
         registry.setdefault(level, {})[horizon] = {
@@ -1034,7 +1049,7 @@ def generate_coverage_calibration(test_df, models):
     if not df.empty:
         logger.info(f"  coverage_calibration.csv: {df.shape[0]} rows")
     else:
-        logger.warning("  coverage_calibration.csv: no data")
+        raise RuntimeError("coverage_calibration.csv: no data (coverage evaluation failed)")
 
 
 def main():

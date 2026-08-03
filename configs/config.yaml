@@ -89,6 +89,7 @@ forecasting:
 # FEATURE ENGINEERING
 # ============================================================
 features:
+  version: "v5"
   lag_steps: [1, 2, 3, 6, 12, 144]
   rolling_windows: [6, 18, 36, 144]
   rolling_stats: ["mean", "std", "min", "max"]

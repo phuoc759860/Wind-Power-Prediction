@@ -10,7 +10,7 @@ import seaborn as sns
 from typing import Dict, List, Tuple
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from evaluation.official_mask import build_official_mask
+from evaluation.official_mask import build_official_mask, add_official_mask_columns, REQUIRED_MASK_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -112,19 +112,25 @@ def _provenance_mask(test_data: pd.DataFrame, length: int) -> np.ndarray:
 def _official_eval_mask(test_data: pd.DataFrame, length: int) -> np.ndarray:
     """Return the single canonical evaluation mask.
 
-    Prefer the reviewer-specified official mask when the required columns exist.
-    Otherwise, fall back to the legacy provenance filter so older test fixtures
-    keep working without duplicating sampling rules.
+    Applies the reviewer-specified official mask (observed, not imputed, before
+    the official cutoff, prediction/feature available). When the required
+    columns are missing they are derived from the pipeline's provenance flags
+    via add_official_mask_columns, so evaluation never silently bypasses the
+    official mask. As a last resort for synthetic test fixtures it falls back
+    to the legacy provenance filter with a loud warning.
     """
     if test_data is None:
         return np.ones(length, dtype=bool)
 
     try:
-        mask = build_official_mask(test_data)
+        work = test_data
+        if any(c not in test_data.columns for c in REQUIRED_MASK_COLUMNS):
+            work = add_official_mask_columns(test_data)
+        mask = build_official_mask(work)
         if len(mask) >= length:
             return np.asarray(mask.iloc[:length].to_numpy(dtype=bool), dtype=bool)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Official mask unavailable ({e}); falling back to provenance mask")
 
     return _provenance_mask(test_data, length)
 
@@ -671,7 +677,7 @@ def compute_farm_level_metrics(test_data: pd.DataFrame, predictions: Dict,
         actual = np.asarray(test_data[target].values[:n], dtype=float)
         preds = np.asarray(pred_values[:n], dtype=float)
         valid = ~(np.isnan(actual) | np.isnan(preds))
-        valid &= _provenance_mask(test_data, len(valid))
+        valid &= _official_eval_mask(test_data, len(valid))
         if valid.sum() == 0:
             continue
         actual_f = actual[valid]
@@ -1771,7 +1777,17 @@ def evaluate_coverage_calibration(test_data: pd.DataFrame, predictions: Dict,
                     horizon = h["name"]
                     break
 
-        errors = np.abs(actual - pred_values)
+        # Reviewer: restrict to the canonical official mask so coverage
+        # calibration is scored on the same rows as every other metric.
+        mask = _official_eval_mask(test_data, len(pred_values))
+        mask &= ~np.isnan(pred_values[:len(mask)])
+        if mask.sum() == 0:
+            continue
+
+        actual_m = np.asarray(actual[:len(mask)], dtype=float)[mask]
+        pred_m = np.asarray(pred_values[:len(mask)], dtype=float)[mask]
+
+        errors = np.abs(actual_m - pred_m)
         n = len(errors)
         if n == 0:
             continue
@@ -1779,9 +1795,9 @@ def evaluate_coverage_calibration(test_data: pd.DataFrame, predictions: Dict,
         for conf in confidence_levels:
             alpha = 1 - conf
             q = np.nanquantile(errors, conf)
-            lower = pred_values - q
-            upper = pred_values + q
-            inside = (actual >= lower) & (actual <= upper)
+            lower = pred_m - q
+            upper = pred_m + q
+            inside = (actual_m >= lower) & (actual_m <= upper)
             emp_coverage = np.mean(inside)
             interval_width = np.mean(upper - lower)
             calibration_error = abs(emp_coverage - conf)
