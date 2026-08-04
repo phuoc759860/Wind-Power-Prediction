@@ -4,45 +4,45 @@
       "feature_version": "v5",
       "model_key": "farm_total_power_target_10min_xgboost",
       "model_path": "models/farm_total_power_target_10min_xgboost_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     },
     "1hour": {
       "feature_version": "v5",
       "model_key": "farm_total_power_target_1hour_lightgbm",
       "model_path": "models/farm_total_power_target_1hour_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     },
     "24hour": {
       "feature_version": "v5",
       "model_key": "farm_total_power_target_24hour_lightgbm",
       "model_path": "models/farm_total_power_target_24hour_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     },
     "30min": {
       "feature_version": "v5",
       "model_key": "farm_total_power_target_30min_lightgbm",
       "model_path": "models/farm_total_power_target_30min_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     },
     "6hour": {
       "feature_version": "v5",
       "model_key": "farm_total_power_target_6hour_lightgbm",
       "model_path": "models/farm_total_power_target_6hour_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     }
   },
@@ -51,45 +51,45 @@
       "feature_version": "v5",
       "model_key": "TB01_power_target_10min_lightgbm",
       "model_path": "models/TB01_power_target_10min_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     },
     "1hour": {
       "feature_version": "v5",
       "model_key": "TB01_power_target_1hour_lightgbm",
       "model_path": "models/TB01_power_target_1hour_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     },
     "24hour": {
       "feature_version": "v5",
       "model_key": "TB01_power_target_24hour_lightgbm",
       "model_path": "models/TB01_power_target_24hour_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     },
     "30min": {
       "feature_version": "v5",
       "model_key": "TB01_power_target_30min_lightgbm",
       "model_path": "models/TB01_power_target_30min_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     },
     "6hour": {
       "feature_version": "v5",
       "model_key": "TB01_power_target_6hour_lightgbm",
       "model_path": "models/TB01_power_target_6hour_lightgbm_model.joblib",
-      "model_version": "bf760eecdfc325a0fa7de239458afba3ad84eac3",
+      "model_version": "025f17aed5d619047c5c0bd2f6311daa46135d79",
       "quality_flag": "PASS",
-      "run_id": "run-20260803T040341Z",
+      "run_id": "run-20260803T153122Z",
       "training_cutoff": "2025-02-25 21:20:00"
     }
   }

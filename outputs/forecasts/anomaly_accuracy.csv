@@ -1,13 +1,13 @@
 turbine_id,method,confirmed,verification_status,n_gt_anomalies,n_detected,tp,fp,fn,tn,precision,recall,f1,false_alarm_ratio,false_alarm_rate,specificity,balanced_accuracy,prevalence,power_anomaly_precision,wind_curve_anomaly_precision
-TB01,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB02,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB03,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB04,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB05,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB06,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB07,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB08,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB09,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,1,0,0,0,1,28231,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB10,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB11,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
-TB12,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,1,0,0,0,1,28231,0,0.0,0,0.0,0.0,1.0,0.5,0.0,0,0
+TB01,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB02,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB03,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB04,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB05,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB06,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB07,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB08,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB09,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,1,0,0,0,1,28231,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB10,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB11,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,0,0,0,0,0,28232,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0
+TB12,z-score > 3 on power (global mean/std),False,SCREENING_ONLY,1,0,0,0,1,28231,0,0.0,0,0,0.0,1.0,0.5,0.0,0,0

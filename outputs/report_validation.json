@@ -1,5 +1,5 @@
 {
-  "validated_at": "2026-08-03T14:29:20",
+  "validated_at": "2026-08-03T23:23:56",
   "report_pdf": "D:\\LEARNING\\Internship\\AMG\\Wind Power\\wind_forecasting\\outputs\\AMG_Wind_Power_Forecasting_Report_Revised.pdf",
   "status": "PASS",
   "checks": {
@@ -221,7 +221,7 @@
     ],
     "pdf": {
       "pages": 45,
-      "text_chars": 73470
+      "text_chars": 73465
     }
   }
 }

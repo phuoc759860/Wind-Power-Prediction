@@ -1,8 +1,8 @@
 {
   "config_hash": "b0a5d33f9826e8543b1d6ef02f597d09f596085e263508ad9482ef177cfd63fe",
-  "data_hash": "71d31c92b1fc6e6ebfd09a21dd4f564f4541fd621c8736e54da3a55f9291ee52",
-  "git_commit": "e128b615c65f",
-  "output_hash": "0644f662bdacaa330c8636f6dbf04a766f02d8b2669d6b5b4c5b3295b676dc0e",
+  "data_hash": "5a2bde5c5764cbcf805e84cbbbc1175ba0a777b51d10bf4721181726608125f2",
+  "git_commit": "025f17aed5d6",
+  "output_hash": "a5a2834a88cb1fa11ec1369196cddc259a02738e65572df88ed7cf87a8e18ad3",
   "packages": {
     "PyYAML": "6.0.3",
     "Pygments": "2.20.0",
@@ -18,7 +18,6 @@
     "et_xmlfile": "2.0.0",
     "fastapi": "0.139.2",
     "fonttools": "4.63.0",
-    "git-filter-repo": "2.47.0",
     "h11": "0.16.0",
     "httpcore": "1.0.9",
     "httpx": "0.28.1",
@@ -34,14 +33,13 @@
     "packaging": "26.2",
     "pandas": "2.3.3",
     "pillow": "12.3.0",
-    "pip": "26.1.2",
+    "pip": "26.2",
     "pluggy": "1.6.0",
     "pyarrow": "25.0.0",
     "pydantic": "2.13.4",
     "pydantic_core": "2.46.4",
     "pymupdf": "1.28.0",
     "pyparsing": "3.3.2",
-    "pypdf": "6.14.2",
     "pytest": "9.1.1",
     "python-dateutil": "2.9.0.post0",
     "python-multipart": "0.0.32",
@@ -60,8 +58,8 @@
     "uvicorn": "0.51.0",
     "xgboost": "3.3.0"
   },
-  "python": "3.14.6",
-  "run_id": "run-20260803T040341Z",
+  "python": "3.12.3",
+  "run_id": "run-20260803T153122Z",
   "seed": 0,
-  "timestamp": "2026-08-03T06:37:35.855317+00:00"
+  "timestamp": "2026-08-03T16:23:44.826614+00:00"
 }
